@@ -95,8 +95,16 @@ describe('the rule that reads a module for a picker', () => {
       "import * as Clipboard from 'expo-clipboard'\nexport const r = () => Clipboard.getImageAsync({ format: 'png' })",
     'renamed-image-read.ts':
       "import { getImageAsync as readImage } from 'expo-clipboard'\nexport const r = readImage",
+    'destructured.ts':
+      "import * as Clipboard from 'expo-clipboard'\nconst { getImageAsync } = Clipboard\nexport const r = getImageAsync",
+    'destructured-renamed.ts':
+      "import * as Clipboard from 'expo-clipboard'\nconst { getImageAsync: readImage } = Clipboard\nexport const r = readImage",
+    're-destructured.ts':
+      "import * as Clipboard from 'expo-clipboard'\nconst pasteboard = Clipboard\nconst again = pasteboard\nconst { getImageAsync } = again\nexport const r = getImageAsync",
     'clipboard-text.ts':
       "import * as Clipboard from 'expo-clipboard'\nexport const r = () => Clipboard.getStringAsync()",
+    'destructured-text.ts':
+      "import * as Clipboard from 'expo-clipboard'\nconst { getStringAsync } = Clipboard\nexport const r = getStringAsync",
     'mentions-only.ts':
       "// expo-image-picker and Clipboard.getImageAsync are reached through the seam\nexport const note = 'expo-document-picker'"
   }
@@ -111,8 +119,11 @@ describe('the rule that reads a module for a picker', () => {
       const closure = { local: Object.keys(PLANTED).map((name) => `src/${name}`) }
       expect(mediaPickerOffenders(scratch, closure)).toEqual([
         'src/clipboard-image.ts:2',
+        'src/destructured-renamed.ts:2',
+        'src/destructured.ts:2',
         'src/documents.ts:1',
         'src/namespace-picker.ts:1',
+        'src/re-destructured.ts:4',
         'src/re-export.ts:1',
         'src/renamed-image-read.ts:1',
         'src/side-effect.ts:1'

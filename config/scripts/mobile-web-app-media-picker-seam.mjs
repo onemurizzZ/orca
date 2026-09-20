@@ -52,9 +52,25 @@ export function mediaPickerSites(source, fileName = 'module.tsx') {
     statement.moduleSpecifier !== undefined && ts.isStringLiteral(statement.moduleSpecifier)
       ? statement.moduleSpecifier.text
       : null
-  /** `propertyName` is the imported name when the clause renames it, `name` when it does not. */
+  /**
+   * `propertyName` is the imported or destructured name when the clause renames it, `name` when it
+   * does not. A binding element's `name` may be a nested pattern rather than an identifier and a
+   * `propertyName` may be computed, so the text is read only off a node that has one.
+   */
   const namesImageRead = (elements) =>
-    elements.some((element) => (element.propertyName ?? element.name).text === CLIPBOARD_IMAGE_READ)
+    elements.some((element) => {
+      const named = element.propertyName ?? element.name
+      return (
+        (ts.isIdentifier(named) || ts.isStringLiteral(named)) && named.text === CLIPBOARD_IMAGE_READ
+      )
+    })
+
+  /** A declaration reading straight off one of the module's aliases: `const x = Clipboard`. */
+  const declaredFromAlias = (node) =>
+    ts.isVariableDeclaration(node) &&
+    node.initializer !== undefined &&
+    ts.isIdentifier(node.initializer) &&
+    clipboardAliases.has(node.initializer.text)
 
   for (const statement of parsed.statements) {
     const specifier =
@@ -100,12 +116,46 @@ export function mediaPickerSites(source, fileName = 'module.tsx') {
   }
 
   if (clipboardAliases.size > 0) {
+    /**
+     * Every further name the module is reachable under, to a fixpoint.
+     *
+     * `const pasteboard = Clipboard` makes `pasteboard` the module too, and the chain has no
+     * length limit. A fixpoint rather than one pass in source order, because the rule is about
+     * what the module can be reached as and not about the order a reader arrives in.
+     */
+    for (let grew = true; grew;) {
+      grew = false
+      const learn = (node) => {
+        if (
+          declaredFromAlias(node) &&
+          ts.isIdentifier(node.name) &&
+          !clipboardAliases.has(node.name.text)
+        ) {
+          clipboardAliases.add(node.name.text)
+          grew = true
+        }
+        ts.forEachChild(node, learn)
+      }
+      ts.forEachChild(parsed, learn)
+    }
+
     const visit = (node) => {
       if (
         ts.isPropertyAccessExpression(node) &&
         ts.isIdentifier(node.expression) &&
         clipboardAliases.has(node.expression.text) &&
         node.name.text === CLIPBOARD_IMAGE_READ
+      ) {
+        sites.push(lineOf(node))
+      }
+      // `const { getImageAsync } = Clipboard` reaches the same function without ever writing the
+      // property access above. A census that read only the access approved the closure while that
+      // call died on the browser clipboard API. Reported at the declaration, which is the line to
+      // delete.
+      if (
+        declaredFromAlias(node) &&
+        ts.isObjectBindingPattern(node.name) &&
+        namesImageRead(node.name.elements)
       ) {
         sites.push(lineOf(node))
       }
