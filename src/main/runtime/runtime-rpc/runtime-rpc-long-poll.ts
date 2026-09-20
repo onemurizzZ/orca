@@ -29,6 +29,9 @@ export function classifyRuntimeLongPoll(request: RpcRequest): RuntimeLongPollCla
   if (request.method === 'browser.clientHost.attach') {
     return 'browser-host'
   }
+  if (request.method === 'files.edit') {
+    return 'wait'
+  }
   if (request.method === 'terminal.wait') {
     return 'wait'
   }

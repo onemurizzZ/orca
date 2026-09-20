@@ -96,12 +96,15 @@ export function attachEditorAutosaveController(store: AppStoreApi): () => void {
     }
     detail.claim()
 
-    const matchingFiles =
+    // A closed tab may still own a queued disk write.
+    const matchingIds =
       'fileId' in detail
-        ? store.getState().openFiles.filter((file) => file.id === detail.fileId)
-        : getOpenFilesForExternalFileChange(store.getState().openFiles, detail)
+        ? [detail.fileId]
+        : getOpenFilesForExternalFileChange(store.getState().openFiles, detail).map(
+            (file) => file.id
+          )
 
-    await Promise.all(matchingFiles.map((file) => quiesceFileSave(file.id)))
+    await Promise.all(matchingIds.map((fileId) => quiesceFileSave(fileId)))
     detail.resolve()
   }
 
