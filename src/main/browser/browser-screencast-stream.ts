@@ -34,7 +34,8 @@ export async function startBrowserScreencast(
 
   let closed = false
   let stopping = false
-  // The dialog this stream reported and has not seen closed; only this session may answer it.
+  // The dialog this stream reported and has not seen closed. Only this session may answer it, so
+  // it is settled before the stream goes away rather than carried to one that cannot.
   let dialogOpen = false
   let resolveDone!: () => void
   // Serializes viewport and frame-budget changes against the snapshot capture they trigger.
@@ -173,6 +174,18 @@ export async function startBrowserScreencast(
       try {
         void (async () => {
           await pendingUpdate.catch(() => {})
+          // Why: only this CDP session may answer the dialog it reported, and a session that did
+          // not see it cannot even enable the Page domain while it is up — both measured on
+          // Chromium 1217, 2026-09-20. Leaving one outstanding would block the page for good,
+          // because the stream that replaces this one hangs on its own start. Dismissing is the
+          // conservative answer for every dialog type, and the automation path has taken it since
+          // `cdp-debugger-events.ts`.
+          if (dialogOpen) {
+            dialogOpen = false
+            await sendDebuggerCommand(dbg, 'Page.handleJavaScriptDialog', {
+              accept: false
+            }).catch(() => {})
+          }
           await sendDebuggerCommand(dbg, 'Page.stopScreencast').catch(() => {})
           if (deviceMetrics.isOverridden()) {
             await deviceMetrics.clear().catch(() => {})

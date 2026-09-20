@@ -93,6 +93,41 @@ describe('the browser screencast settles the dialog it reported', () => {
     await session.done
   })
 
+  it('dismisses a dialog still open when the stream stops, so no later session inherits it', async () => {
+    const webContents = createMockScreencastWebContents()
+    const session = await startBrowserScreencast(webContents as never, {
+      ...OPTIONS,
+      onFrame: vi.fn()
+    })
+
+    openDialog(webContents, 'confirm', 'still up')
+    session.stop()
+    await session.done
+
+    // Before `Page.stopScreencast`, because a stopped screencast is still an attached session and
+    // the order is what makes the answer land rather than race the teardown.
+    const methods = webContents.debugger.sendCommand.mock.calls.map((call) => call[0])
+    expect(dialogCalls(webContents)).toEqual([['Page.handleJavaScriptDialog', { accept: false }]])
+    expect(methods.indexOf('Page.handleJavaScriptDialog')).toBeLessThan(
+      methods.indexOf('Page.stopScreencast')
+    )
+  })
+
+  it('leaves the page alone when it stops with no dialog open', async () => {
+    const webContents = createMockScreencastWebContents()
+    const session = await startBrowserScreencast(webContents as never, {
+      ...OPTIONS,
+      onFrame: vi.fn()
+    })
+
+    openDialog(webContents)
+    webContents.debugger.emit('message', {}, 'Page.javascriptDialogClosed', {})
+    session.stop()
+    await session.done
+
+    expect(dialogCalls(webContents)).toEqual([])
+  })
+
   it('raises every dialog of the subscription, not just the first', async () => {
     const webContents = createMockScreencastWebContents()
     const onEvent = vi.fn()
