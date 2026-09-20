@@ -8,7 +8,10 @@
  * the real `BridgeHostSubscriptions`. It is the only thing here that can falsify the number.
  *
  * Chromium rather than a Node encoder, because the frames are CDP screencast frames: the bytes the
- * budget has to survive are the ones Chromium produces, not the ones another library would.
+ * budget has to survive are the ones Chromium produces, not the ones another library would. And
+ * `Page.startScreencast` rather than `canvas.toDataURL`, because that is the encoder the product
+ * runs: the certification and the pane now go through one code path, so a drift in it cannot show
+ * up in the product without showing up here.
  *
  * In `config/scripts` rather than the mobile suite for that reason — this is where a browser is
  * available — and it drives the mobile modules directly, so the budget, the scale and the host are
@@ -19,7 +22,7 @@
  * this file changes. Both key off that prefix.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { chromium, type Browser, type Page } from 'playwright-core'
+import { chromium, type Browser, type CDPSession, type Page } from 'playwright-core'
 import { mobileWebAppDependenciesPresent } from './mobile-web-app-bundle-dependencies.mjs'
 import type { BrowserScreencastFrame } from '../../mobile/src/transport/browser-screencast-protocol'
 
@@ -74,6 +77,7 @@ const VIEWPORTS: Viewport[] = VIEWPORT_WIDTHS.flatMap((width) =>
 
 let browser: Browser | null = null
 let page: Page | null = null
+let cdp: CDPSession | null = null
 
 /**
  * Skipped where the bundling tests skip, which is the sharded `test` job.
@@ -94,8 +98,17 @@ beforeAll(async () => {
     headless: true,
     ...(executablePath ? { executablePath } : {})
   })
-  page = await (await browser.newContext()).newPage()
-  await page.goto('about:blank')
+  const context = await browser.newContext()
+  page = await context.newPage()
+  cdp = await context.newCDPSession(page)
+  // A viewport meta, so the page lays out at the emulated width instead of Chromium's 980 px
+  // default. Without it the canvas is scaled into the frame, the noise averages away, and the
+  // sweep reads about 0.12 bytes per pixel — a fifth of the truth.
+  await page.setContent(
+    '<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1">' +
+      '<style>html,body{margin:0;overflow:hidden;background:#000}canvas{display:block}</style>' +
+      '</head><body><canvas id="noise"></canvas></body></html>'
+  )
 }, 120_000)
 
 afterAll(async () => {
@@ -103,19 +116,42 @@ afterAll(async () => {
 })
 
 /**
- * A noise JPEG at the quality the pane ships, encoded by Chromium, returned as the base64 the
- * bridge carries. The quality is read, not retyped: at 90 every budgeted viewport posts over the cap.
+ * A noise JPEG at the quality the pane ships, encoded by Chromium's screencast, in bytes.
+ *
+ * The frame is emulated at one device pixel per CSS pixel and the canvas is painted at that same
+ * size, so every pixel of noise reaches the encoder unaveraged. Emulating the pane's own device
+ * scale factor instead would not: headless Chromium composites at the DIP surface size whatever
+ * `deviceScaleFactor` says, so the canvas would be downscaled into the frame and the sweep would
+ * read about a fifth of the real cost. What the constant measures is bytes per pixel of noise at
+ * this quality, and the encoder does not care which surface those pixels came from.
+ *
+ * The quality is read, not retyped: at 90 every budgeted viewport posts over the cap.
  */
-async function encodeNoiseJpeg(size: { width: number; height: number }, seed: number) {
-  if (page === null) {
+async function screencastNoiseJpegBytes(
+  frame: { width: number; height: number },
+  seed: number
+): Promise<number> {
+  if (page === null || cdp === null) {
     throw new Error('the sweep has no page')
   }
-  const quality = sweep().BROWSER_FRAME_QUALITY / 100
-  return await page.evaluate(
-    ({ width, height, seed, quality }) => {
-      const canvas = document.createElement('canvas')
+  const session = cdp
+  const sheet = page
+  await session.send('Emulation.setDeviceMetricsOverride', {
+    width: frame.width,
+    height: frame.height,
+    deviceScaleFactor: 1,
+    mobile: true
+  })
+  await sheet.evaluate(
+    ({ width, height, seed }) => {
+      const canvas = document.getElementById('noise')
+      if (!(canvas instanceof HTMLCanvasElement)) {
+        throw new Error('no noise canvas')
+      }
       canvas.width = width
       canvas.height = height
+      canvas.style.width = `${width}px`
+      canvas.style.height = `${height}px`
       const context = canvas.getContext('2d')
       if (context === null) {
         throw new Error('no 2d context')
@@ -130,16 +166,42 @@ async function encodeNoiseJpeg(size: { width: number; height: number }, seed: nu
         image.data[index + 3] = 255
       }
       context.putImageData(image, 0, 0)
-      return canvas.toDataURL('image/jpeg', quality).split(',')[1] ?? ''
     },
-    { ...size, seed, quality }
+    { ...frame, seed }
   )
-}
 
-/** Base64 back to the byte length it stands for, which is what the shell is handed. */
-function base64ByteLength(b64: string): number {
-  const padding = b64.endsWith('==') ? 2 : b64.endsWith('=') ? 1 : 0
-  return (b64.length / 4) * 3 - padding
+  const sizes: number[] = []
+  const onFrame = (event: { data: string; sessionId: number }): void => {
+    sizes.push(Buffer.from(event.data, 'base64').length)
+    void session.send('Page.screencastFrameAck', { sessionId: event.sessionId }).catch(() => {})
+  }
+  session.on('Page.screencastFrame', onFrame)
+  try {
+    await session.send('Page.startScreencast', {
+      format: 'jpeg',
+      quality: sweep().BROWSER_FRAME_QUALITY,
+      maxWidth: frame.width,
+      maxHeight: frame.height,
+      everyNthFrame: 1
+    })
+    // Two frames, nudged by a repaint: the first can be the surface as it was before the canvas
+    // landed. The largest is the one carrying the noise — a stale or blank frame is a fraction of
+    // its size, so taking the maximum needs no guess about which arrived when.
+    const deadline = Date.now() + 20_000
+    for (let nudge = 0; sizes.length < 2 && Date.now() < deadline; nudge += 1) {
+      await sheet.evaluate((n: number) => {
+        document.documentElement.style.background = n % 2 === 0 ? '#000' : '#111'
+      }, nudge)
+      await sheet.waitForTimeout(80)
+    }
+  } finally {
+    await session.send('Page.stopScreencast').catch(() => {})
+    session.off('Page.screencastFrame', onFrame)
+  }
+  if (sizes.length === 0) {
+    throw new Error(`no screencast frame for ${frame.width}x${frame.height}`)
+  }
+  return Math.max(...sizes)
 }
 
 function screencastFrame(image: Uint8Array, frame: { width: number; height: number }) {
@@ -218,8 +280,10 @@ describeSweep('the frame budget across the viewport range', () => {
     let bestBytesPerPixel = 1
     for (const viewport of VIEWPORTS.filter(withinBudget)) {
       const frame = budgetedFrame(viewport)
-      const b64 = await encodeNoiseJpeg(frame, viewport.width * 7_919 + viewport.height)
-      const imageBytes = base64ByteLength(b64)
+      const imageBytes = await screencastNoiseJpegBytes(
+        frame,
+        viewport.width * 7_919 + viewport.height
+      )
       const bytesPerPixel = imageBytes / (frame.width * frame.height)
       worstBytesPerPixel = Math.max(worstBytesPerPixel, bytesPerPixel)
       bestBytesPerPixel = Math.min(bestBytesPerPixel, bytesPerPixel)
@@ -231,9 +295,13 @@ describeSweep('the frame budget across the viewport range', () => {
       }
     }
 
+    console.log(
+      `[frame-budget-sweep] screencast bytes per pixel: max ${worstBytesPerPixel.toFixed(5)}, ` +
+        `min ${bestBytesPerPixel.toFixed(5)}`
+    )
     expect(overCap).toEqual([])
     // And the constant is above every cost that sweep just measured. Against the constant, not the
-    // 0.55351 measured on 2026-09-20 that its docstring records: the margin above that is what an
+    // 0.552964 measured on 2026-09-20 that its docstring records: the margin above that is what an
     // encoder drift may spend, and a drift inside it is not a budget failure. Without this the
     // assertion above passes by the budget being merely generous.
     expect(worstBytesPerPixel).toBeLessThanOrEqual(sweep().WORST_CASE_JPEG_BYTES_PER_PIXEL)
@@ -253,8 +321,8 @@ describeSweep('the frame budget across the viewport range', () => {
     )
     const frame = budgetedFrame(largest)
     expect(frame.scale).toBe(1)
-    const b64 = await encodeNoiseJpeg(frame, 1)
-    expect(postThroughShell(new Uint8Array(base64ByteLength(b64)), frame)).toBeNull()
+    const imageBytes = await screencastNoiseJpegBytes(frame, 1)
+    expect(postThroughShell(new Uint8Array(imageBytes), frame)).toBeNull()
   }, 120_000)
 
   it('never asks for more density than native, anywhere in the range', () => {
