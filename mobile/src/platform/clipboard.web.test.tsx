@@ -24,13 +24,17 @@ import {
   createFakeBridgePortPair,
   type BridgePortPair
 } from '../mobile-web-shell/bridge/bridge-port-pair-test-harness'
-import { useClipboardWriter } from './clipboard.web'
-import type { ClipboardWriter } from './clipboard'
+import { useClipboardReader, useClipboardWriter } from './clipboard.web'
+import type { ClipboardReader, ClipboardWriter } from './clipboard'
 
-const held: { writer: ClipboardWriter | null } = { writer: null }
+const held: { writer: ClipboardWriter | null; reader: ClipboardReader | null } = {
+  writer: null,
+  reader: null
+}
 
 function Screen(): null {
   held.writer = useClipboardWriter()
+  held.reader = useClipboardReader()
   return null
 }
 
@@ -54,8 +58,18 @@ async function mount(pair: BridgePortPair): Promise<ClipboardWriter> {
   return writer
 }
 
+async function mountReader(pair: BridgePortPair): Promise<ClipboardReader> {
+  await mount(pair)
+  const reader = held.reader
+  if (reader === null) {
+    throw new Error('nothing mounted')
+  }
+  return reader
+}
+
 beforeEach(() => {
   held.writer = null
+  held.reader = null
 })
 
 describe('writing the clipboard from inside the shell', () => {
@@ -88,6 +102,29 @@ describe('writing the clipboard from inside the shell', () => {
     expect(String(await written)).toMatch(/did not grant/)
     // A rejection after a round trip and one that never left look the same to an `await`; only the
     // first would have put a request on the wire.
+    expect(pair.toShell).toHaveLength(before)
+  })
+})
+
+describe('reading the clipboard from inside the shell', () => {
+  it('answers what the shell read off the device pasteboard', async () => {
+    const pair = createFakeBridgePortPair()
+    const reader = await mountReader(pair)
+    const read = reader.readText()
+    await pair.flush()
+    // The pair's own answer for `native.clipboard.read`, so this is the verb's reply and not a
+    // value this side invented.
+    await expect(read).resolves.toBe('pasteboard')
+    expect(pair.rpc.requests).toEqual([])
+  })
+
+  it('rejects on a route that was not granted the verb, without sending a frame', async () => {
+    const pair = createFakeBridgePortPair({ routeGrants: ['navigate', 'storage'] })
+    const reader = await mountReader(pair)
+    const before = pair.toShell.length
+    const read = reader.readText().catch((error: unknown) => error)
+    await pair.flush()
+    expect(String(await read)).toMatch(/did not grant native\.clipboard\.read/)
     expect(pair.toShell).toHaveLength(before)
   })
 })

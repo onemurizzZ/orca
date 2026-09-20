@@ -12,6 +12,18 @@ import * as Clipboard from 'expo-clipboard'
  */
 export type ClipboardWriter = { writeText: (value: string) => Promise<void> }
 
+/** Reading is the other half of the same seam and the same reason: on the web `expo-clipboard`
+ *  is `navigator.clipboard`, which needs a secure context the iOS shell's custom scheme is not. */
+export type ClipboardReader = { readText: () => Promise<string> }
+
+/** A module constant rather than a `useMemo`: reading has no client to close over on a phone, and
+ *  one frozen object lets every caller put it in a dependency list. */
+const deviceReader: ClipboardReader = { readText: () => Clipboard.getStringAsync() }
+
+export function useClipboardReader(): ClipboardReader {
+  return deviceReader
+}
+
 export function useClipboardWriter(): ClipboardWriter {
   return useMemo(
     () => ({

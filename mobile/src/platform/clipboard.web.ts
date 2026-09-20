@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { useNativeVerbs } from '../mobile-web-shell/bridge/use-native-verbs'
-import type { ClipboardWriter } from './clipboard'
+import type { ClipboardReader, ClipboardWriter } from './clipboard'
 
 /**
  * Web sibling: the page has no clipboard of its own worth using, so the shell writes for it.
@@ -13,6 +13,14 @@ import type { ClipboardWriter } from './clipboard'
  * A route that did not declare `native.clipboard.write` is not granted it, and the call rejects
  * before a frame is sent; the callers' own `catch` puts that on screen.
  */
+export function useClipboardReader(): ClipboardReader {
+  const verbs = useNativeVerbs()
+
+  // No refusal of its own: the verb answers whatever the pasteboard held, empty string included,
+  // and a route that was not granted it rejects before a frame is sent.
+  return useMemo(() => ({ readText: () => verbs.readClipboardText() }), [verbs])
+}
+
 export function useClipboardWriter(): ClipboardWriter {
   const verbs = useNativeVerbs()
 

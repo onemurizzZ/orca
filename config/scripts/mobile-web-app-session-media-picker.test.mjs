@@ -29,28 +29,21 @@ const describeClosure = mobileWebAppDependenciesPresent() ? describe : describe.
 
 const SESSION = 'app/h/[hostId]/session/[worktreeId].tsx'
 
-/**
- * The modules still on the direct path, and the only ones allowed to be.
- *
- * C7.6 lands the seam first and moves its callers second, so this is the census's own red-first:
- * an offender that is not one of these fails today, and the list goes empty in the commit that
- * moves the screen's pickers onto the seam.
- */
-const MOVING_IN_THE_NEXT_COMMIT = [
-  'src/session/mobile-image-source-picker.ts:1',
-  'src/session/mobile-image-source-picker.ts:3',
-  'src/session/use-mobile-terminal-paste.ts'
-]
-
 describeClosure(
   'the session page closure',
   () => {
-    it('reaches no picker but the seam, or names the module that does', async () => {
+    it('reaches no picker but the seam', async () => {
       const closure = await mobileWebAppRouteClosure(SESSION)
-      const unexpected = mediaPickerOffenders(mobileDir, closure).filter(
-        (offender) => !MOVING_IN_THE_NEXT_COMMIT.some((known) => offender.startsWith(known))
-      )
-      expect(unexpected).toEqual([])
+      expect(mediaPickerOffenders(mobileDir, closure)).toEqual([])
+    })
+
+    it('carries the seam, so the rule above is not vacuous', async () => {
+      const closure = await mobileWebAppRouteClosure(SESSION)
+      expect(closure.local).toContain(SEAM)
+      // And not the native picker chain it stands in for: the two modules that reach the OS
+      // pickers resolve out of this closure entirely rather than sitting in it unused.
+      expect(closure.local).not.toContain('src/platform/media-picker.ts')
+      expect(closure.local).not.toContain('src/session/mobile-image-source-picker.ts')
     })
 
     it('is big enough that finding nothing would mean something', async () => {

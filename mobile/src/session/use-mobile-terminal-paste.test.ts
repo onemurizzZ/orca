@@ -3,9 +3,15 @@ import type { RpcClient } from '../transport/rpc-client'
 import { useMobileTerminalPaste } from './use-mobile-terminal-paste'
 
 vi.mock('react', () => ({ useCallback: (callback: unknown) => callback }))
+// The seam's native half is what the hook now calls, so its two device modules are what a test
+// stands in for: the pasteboard it reads text and images from, and the pickers behind it.
 vi.mock('expo-clipboard', () => ({
   getStringAsync: async () => '',
   getImageAsync: async () => ({ data: 'png' })
+}))
+vi.mock('./mobile-image-source-picker', () => ({
+  pickMobileImage: vi.fn(),
+  pickMobileImages: vi.fn()
 }))
 vi.mock('expo-file-system', () => ({ File: class {}, Paths: {} }))
 vi.mock('expo-image-manipulator', () => ({ ImageManipulator: {}, SaveFormat: {} }))
