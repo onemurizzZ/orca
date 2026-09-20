@@ -1,6 +1,7 @@
 // @ts-nocheck -- mechanically split class members.
 import { RuntimeBrowserCommandsWithBrowserNetworkLog } from './runtime-browser-commands-browser-network-log'
 import type { BrowserCommandTargetParams } from './runtime-browser-commands-browser-command-target-params'
+import { settleBrowserDialogOnLiveScreencast } from './browser-dialog-settlement'
 
 export class RuntimeBrowserCommandsWithBrowserSetHeaders extends RuntimeBrowserCommandsWithBrowserNetworkLog {
   async browserSetHeaders(
@@ -68,6 +69,16 @@ export class RuntimeBrowserCommandsWithBrowserSetHeaders extends RuntimeBrowserC
     params: { text?: string } & BrowserCommandTargetParams
   ): Promise<unknown> {
     const target = await this.resolveBrowserCommandTarget(params)
+    if (
+      await settleBrowserDialogOnLiveScreencast(
+        this.activeScreencastsByPageId,
+        target.browserPageId,
+        true,
+        params.text
+      )
+    ) {
+      return {}
+    }
     return this.requireAgentBrowserBridge().dialogAccept(
       params.text,
       target.worktreeId,
@@ -77,6 +88,15 @@ export class RuntimeBrowserCommandsWithBrowserSetHeaders extends RuntimeBrowserC
 
   async browserDialogDismiss(params: BrowserCommandTargetParams): Promise<unknown> {
     const target = await this.resolveBrowserCommandTarget(params)
+    if (
+      await settleBrowserDialogOnLiveScreencast(
+        this.activeScreencastsByPageId,
+        target.browserPageId,
+        false
+      )
+    ) {
+      return {}
+    }
     return this.requireAgentBrowserBridge().dialogDismiss(target.worktreeId, target.browserPageId)
   }
 

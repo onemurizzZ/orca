@@ -34,6 +34,8 @@ export async function startBrowserScreencast(
 
   let closed = false
   let stopping = false
+  // The dialog this stream reported and has not seen closed; only this session may answer it.
+  let dialogOpen = false
   let resolveDone!: () => void
   // Serializes viewport and frame-budget changes against the snapshot capture they trigger.
   let pendingUpdate = Promise.resolve()
@@ -64,7 +66,10 @@ export async function startBrowserScreencast(
     ackScreencastFrame: framePacer.ackFrame,
     scheduleNavigationFrameCapture: snapshotCapture.scheduleNavigationFrameCapture,
     clearNavigationCaptureTimer: snapshotCapture.clearNavigationCaptureTimer,
-    bumpSnapshotGeneration: snapshotCapture.bumpGeneration
+    bumpSnapshotGeneration: snapshotCapture.bumpGeneration,
+    setDialogOpen: (open: boolean) => {
+      dialogOpen = open
+    }
   })
 
   const startScreencast = (): Promise<unknown> =>
@@ -81,6 +86,7 @@ export async function startBrowserScreencast(
       return
     }
     closed = true
+    dialogOpen = false
     snapshotCapture.clearNavigationCaptureTimer()
     framePacer.clearPending()
     dbg.removeListener('message', handleMessage as never)
@@ -115,6 +121,16 @@ export async function startBrowserScreencast(
   }
 
   return {
+    settleDialog: async (accept: boolean, promptText?: string) => {
+      if (!dialogOpen) {
+        return false
+      }
+      await sendDebuggerCommand(dbg, 'Page.handleJavaScriptDialog', {
+        accept,
+        ...(promptText === undefined ? {} : { promptText })
+      })
+      return true
+    },
     updateViewport: (viewport: BrowserScreencastViewport) => {
       pendingUpdate = pendingUpdate
         .catch(() => {})
