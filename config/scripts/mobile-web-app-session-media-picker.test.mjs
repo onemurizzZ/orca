@@ -1,0 +1,123 @@
+/**
+ * What the session screen may reach to pick media, which is what its media grants are declared
+ * against.
+ *
+ * The route is not registered yet (C7.7 registers it), so this walks the route module's own closure
+ * rather than a page route's. The bundler resolves it exactly as it would a registered one — a
+ * `.web.ts` sibling wins — so the modules judged here are the ones the page would run.
+ *
+ * `expo-image-picker` and `expo-document-picker` throw at import in a browser and the manifest
+ * imports every route, so one of them in this closure is the whole bundle down rather than one
+ * picker; `expo-clipboard`'s `getImageAsync` resolves instead to a `navigator.clipboard` read
+ * needing a secure context, which the iOS shell's custom scheme is not.
+ */
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { describe, expect, it } from 'vitest'
+import { mobileWebAppRouteClosure } from './build-mobile-web-app-bundle.mjs'
+import { mobileWebAppDependenciesPresent } from './mobile-web-app-bundle-dependencies.mjs'
+import {
+  MEDIA_PICKER_SEAM as SEAM,
+  mediaPickerOffenders,
+  mediaPickerSites
+} from './mobile-web-app-media-picker-seam.mjs'
+
+const mobileDir = fileURLToPath(new URL('../../mobile/', import.meta.url))
+const describeClosure = mobileWebAppDependenciesPresent() ? describe : describe.skip
+
+const SESSION = 'app/h/[hostId]/session/[worktreeId].tsx'
+
+/**
+ * The modules still on the direct path, and the only ones allowed to be.
+ *
+ * C7.6 lands the seam first and moves its callers second, so this is the census's own red-first:
+ * an offender that is not one of these fails today, and the list goes empty in the commit that
+ * moves the screen's pickers onto the seam.
+ */
+const MOVING_IN_THE_NEXT_COMMIT = [
+  'src/session/mobile-image-source-picker.ts:1',
+  'src/session/mobile-image-source-picker.ts:3',
+  'src/session/use-mobile-terminal-paste.ts'
+]
+
+describeClosure(
+  'the session page closure',
+  () => {
+    it('reaches no picker but the seam, or names the module that does', async () => {
+      const closure = await mobileWebAppRouteClosure(SESSION)
+      const unexpected = mediaPickerOffenders(mobileDir, closure).filter(
+        (offender) => !MOVING_IN_THE_NEXT_COMMIT.some((known) => offender.startsWith(known))
+      )
+      expect(unexpected).toEqual([])
+    })
+
+    it('is big enough that finding nothing would mean something', async () => {
+      const closure = await mobileWebAppRouteClosure(SESSION)
+      // The largest route of the series; a closure that collapsed would pass every rule above by
+      // containing nothing to judge.
+      expect(closure.local.length).toBeGreaterThan(900)
+    })
+  },
+  240_000
+)
+
+/**
+ * The rule itself, against modules planted in a scratch tree.
+ *
+ * A scan that happens to find today's three call sites is not a scan that would find a fourth, and
+ * the negatives matter as much: this closure is full of `expo-clipboard` text reads that are the
+ * clipboard seam's business and not this one's.
+ */
+describe('the rule that reads a module for a picker', () => {
+  const PLANTED = {
+    'namespace-picker.ts':
+      "import * as ImagePicker from 'expo-image-picker'\nexport const p = ImagePicker",
+    'documents.ts':
+      "import { getDocumentAsync } from 'expo-document-picker'\nexport const d = getDocumentAsync",
+    'side-effect.ts': "import 'expo-image-picker'",
+    're-export.ts': "export { getImageAsync } from 'expo-clipboard'",
+    'clipboard-image.ts':
+      "import * as Clipboard from 'expo-clipboard'\nexport const r = () => Clipboard.getImageAsync({ format: 'png' })",
+    'renamed-image-read.ts':
+      "import { getImageAsync as readImage } from 'expo-clipboard'\nexport const r = readImage",
+    'clipboard-text.ts':
+      "import * as Clipboard from 'expo-clipboard'\nexport const r = () => Clipboard.getStringAsync()",
+    'mentions-only.ts':
+      "// expo-image-picker and Clipboard.getImageAsync are reached through the seam\nexport const note = 'expo-document-picker'"
+  }
+
+  it('names every way in and nothing else', () => {
+    const scratch = mkdtempSync(join(tmpdir(), 'orca-session-media-picker-'))
+    try {
+      mkdirSync(join(scratch, 'src'), { recursive: true })
+      for (const [name, source] of Object.entries(PLANTED)) {
+        writeFileSync(join(scratch, 'src', name), source)
+      }
+      const closure = { local: Object.keys(PLANTED).map((name) => `src/${name}`) }
+      expect(mediaPickerOffenders(scratch, closure)).toEqual([
+        'src/clipboard-image.ts:2',
+        'src/documents.ts:1',
+        'src/namespace-picker.ts:1',
+        'src/re-export.ts:1',
+        'src/renamed-image-read.ts:1',
+        'src/side-effect.ts:1'
+      ])
+    } finally {
+      rmSync(scratch, { recursive: true, force: true })
+    }
+  })
+
+  it('reads a .ts generic arrow as TypeScript, so nothing after one is swallowed', () => {
+    const source =
+      "import * as Clipboard from 'expo-clipboard'\n" +
+      'export const id = <T,>(value: T) => value\n' +
+      'export const r = () => Clipboard.getImageAsync({ format: "png" })\n'
+    expect(mediaPickerSites(source, 'src/generic.ts')).toEqual([3])
+  })
+
+  it('exempts the seam itself, which is the one module allowed to reach them', () => {
+    expect(mediaPickerOffenders(mobileDir, { local: [SEAM] })).toEqual([])
+  })
+})

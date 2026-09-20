@@ -2,6 +2,14 @@ import { useMemo } from 'react'
 import { z } from 'zod'
 import { usePageBridgeClient } from '../../transport/client-context.web'
 import {
+  mediaPickResultSchema,
+  mediaReadResultSchema,
+  mediaReleaseResultSchema,
+  type BridgeMediaChunk,
+  type BridgeMediaItem,
+  type BridgeMediaSource
+} from './bridge-media-verbs'
+import {
   clipboardReadResultSchema,
   clipboardWriteResultSchema,
   type BridgeClipboardMime,
@@ -28,6 +36,14 @@ export type NativeVerbs = {
   granted: boolean
   writeClipboardText: (value: string) => Promise<boolean>
   readClipboardText: () => Promise<string>
+  /** Opens the shell's picker and answers a handle per item; an empty list is a cancelled picker,
+   *  which is not a fault and never a rejection. */
+  pickMedia: (source: BridgeMediaSource, multiple: boolean) => Promise<readonly BridgeMediaItem[]>
+  /** One byte range of a staged item. `length` above the cap is refused by the shell's schema, so
+   *  a caller bounds its own ask rather than discovering the bound as a rejection. */
+  readMedia: (handle: string, offset: number, length: number) => Promise<BridgeMediaChunk>
+  /** False for a handle this session no longer holds, which is not a fault. */
+  releaseMedia: (handle: string) => Promise<boolean>
 }
 
 /**
@@ -150,7 +166,13 @@ export function useNativeVerbs(): NativeVerbs {
       writeClipboardText: async (value) =>
         (await call('native.clipboard.write', { mime, value }, clipboardWriteResultSchema)).written,
       readClipboardText: async () =>
-        (await call('native.clipboard.read', { mime }, clipboardReadResultSchema)).value
+        (await call('native.clipboard.read', { mime }, clipboardReadResultSchema)).value,
+      pickMedia: async (source, multiple) =>
+        (await call('native.media.pick', { source, multiple }, mediaPickResultSchema)).items,
+      readMedia: (handle, offset, length) =>
+        call('native.media.read', { handle, offset, length }, mediaReadResultSchema),
+      releaseMedia: async (handle) =>
+        (await call('native.media.release', { handle }, mediaReleaseResultSchema)).released
     }
   }, [client])
 }

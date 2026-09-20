@@ -1,0 +1,142 @@
+/**
+ * The media-picker seam, and how a census recognises a module that went around it.
+ *
+ * `expo-image-picker` and `expo-document-picker` are native modules: importing either runs a
+ * codegen lookup that throws in a browser, and the route manifest imports every route, so one such
+ * import takes the whole page down rather than one picker. `expo-clipboard`'s `getImageAsync` is
+ * the third way in and fails differently — it resolves on the web to a `navigator.clipboard` read
+ * that needs a secure context, which the iOS shell's custom scheme is not.
+ *
+ * Shared by the censuses rather than restated in each, for the external-link seam's reason: two
+ * spellings of one rule drift, and the half that stops being enforced is the half nobody reads.
+ */
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import ts from 'typescript-api'
+
+/** The seam, as the web build resolves it: `.web.ts` wins under the builder's resolveExtensions. */
+export const MEDIA_PICKER_SEAM = 'src/platform/media-picker.web.ts'
+
+/** The two module specifiers a page closure may not contain at all. */
+export const NATIVE_PICKER_MODULES = ['expo-image-picker', 'expo-document-picker']
+
+const CLIPBOARD_MODULE = 'expo-clipboard'
+const CLIPBOARD_IMAGE_READ = 'getImageAsync'
+
+/**
+ * Every line on which a module reaches a native picker or the pasteboard's image.
+ *
+ * Parsed rather than matched, for the reason the external-link census parses: a regex over the text
+ * names `expo-image-picker` inside the comment that explains why it is not imported, and a census
+ * reporting a line nobody can act on is one the next reader learns to ignore.
+ *
+ * A picker import is reported at the import statement whatever its clause, side-effect imports
+ * included, because the module's own top level is what throws — nothing has to be called. A
+ * re-export is the same statement in the other direction and is reported too.
+ *
+ * `expo-clipboard` is not banned: writing and reading text are the clipboard seam's and legitimate
+ * in this closure. Only the image read is an offence, so a named import of `getImageAsync` is
+ * reported at its import, and a namespace or default binding reports the lines that read the
+ * property off it — `import * as Clipboard from 'expo-clipboard'` is not itself an offence.
+ *
+ * `fileName` decides the script kind, and the default is only for a caller holding a source with no
+ * path: in a `.ts` file `const id = <T>(v: T) => v` is a generic arrow, and parsed as TSX it is an
+ * unclosed JSX element that swallows everything after it into an error node.
+ */
+export function mediaPickerSites(source, fileName = 'module.tsx') {
+  const parsed = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true)
+  const lineOf = (node) => parsed.getLineAndCharacterOfPosition(node.getStart(parsed)).line + 1
+  const sites = []
+  const clipboardAliases = new Set()
+  const specifierOf = (statement) =>
+    statement.moduleSpecifier !== undefined && ts.isStringLiteral(statement.moduleSpecifier)
+      ? statement.moduleSpecifier.text
+      : null
+  /** `propertyName` is the imported name when the clause renames it, `name` when it does not. */
+  const namesImageRead = (elements) =>
+    elements.some((element) => (element.propertyName ?? element.name).text === CLIPBOARD_IMAGE_READ)
+
+  for (const statement of parsed.statements) {
+    const specifier =
+      ts.isImportDeclaration(statement) || ts.isExportDeclaration(statement)
+        ? specifierOf(statement)
+        : null
+    if (specifier === null) {
+      continue
+    }
+    if (NATIVE_PICKER_MODULES.includes(specifier)) {
+      sites.push(lineOf(statement))
+      continue
+    }
+    if (specifier !== CLIPBOARD_MODULE) {
+      continue
+    }
+    if (ts.isExportDeclaration(statement)) {
+      const clause = statement.exportClause
+      // No clause is `export *`, which carries `getImageAsync` along with everything else.
+      if (clause === undefined || ts.isNamespaceExport(clause) || namesImageRead(clause.elements)) {
+        sites.push(lineOf(statement))
+      }
+      continue
+    }
+    const clause = statement.importClause
+    if (clause === undefined) {
+      continue
+    }
+    if (clause.name !== undefined) {
+      clipboardAliases.add(clause.name.text)
+    }
+    const bindings = clause.namedBindings
+    if (bindings === undefined) {
+      continue
+    }
+    if (ts.isNamespaceImport(bindings)) {
+      clipboardAliases.add(bindings.name.text)
+      continue
+    }
+    if (namesImageRead(bindings.elements)) {
+      sites.push(lineOf(statement))
+    }
+  }
+
+  if (clipboardAliases.size > 0) {
+    const visit = (node) => {
+      if (
+        ts.isPropertyAccessExpression(node) &&
+        ts.isIdentifier(node.expression) &&
+        clipboardAliases.has(node.expression.text) &&
+        node.name.text === CLIPBOARD_IMAGE_READ
+      ) {
+        sites.push(lineOf(node))
+      }
+      ts.forEachChild(node, visit)
+    }
+    ts.forEachChild(parsed, visit)
+  }
+  return [...new Set(sites)].sort((left, right) => left - right)
+}
+
+/**
+ * Every module in a closure that can pick media without the seam, as `path:line`.
+ *
+ * A file the closure names but this checkout cannot read is not an offender: the closure reports
+ * paths relative to `mobile/`, and one outside it is the caller's to read rather than guessed at.
+ */
+export function mediaPickerOffenders(mobileDir, closure) {
+  return closure.local
+    .filter((file) => file !== MEDIA_PICKER_SEAM)
+    .flatMap((file) => {
+      let source
+      try {
+        source = readFileSync(join(mobileDir, file), 'utf8')
+      } catch {
+        return []
+      }
+      // The path, so the parser takes the script kind from the extension rather than assuming TSX.
+      return mediaPickerSites(source, file).map((line) => [file, line])
+    })
+    .sort(([leftFile, leftLine], [rightFile, rightLine]) =>
+      leftFile === rightFile ? leftLine - rightLine : leftFile < rightFile ? -1 : 1
+    )
+    .map(([file, line]) => `${file}:${line}`)
+}
