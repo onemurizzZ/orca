@@ -24,6 +24,7 @@ import {
   createFakeBridgePortPair,
   type BridgePortPair
 } from '../mobile-web-shell/bridge/bridge-port-pair-test-harness'
+import { createMediaTestShell, encodeTestBase64, stagedTestBytes } from './media-picker-test-shell'
 import { useClipboardReader, useClipboardWriter } from './clipboard.web'
 import type { ClipboardReader, ClipboardWriter } from './clipboard'
 
@@ -107,24 +108,153 @@ describe('writing the clipboard from inside the shell', () => {
 })
 
 describe('reading the clipboard from inside the shell', () => {
-  it('answers what the shell read off the device pasteboard', async () => {
+  it('asks the shell for the text and never the desktop', async () => {
     const pair = createFakeBridgePortPair()
     const reader = await mountReader(pair)
     const read = reader.readText()
     await pair.flush()
-    // The pair's own answer for `native.clipboard.read`, so this is the verb's reply and not a
-    // value this side invented.
     await expect(read).resolves.toBe('pasteboard')
     expect(pair.rpc.requests).toEqual([])
   })
 
-  it('rejects on a route that was not granted the verb, without sending a frame', async () => {
+  it('rejects the read on a route that was not granted it, without sending a frame', async () => {
     const pair = createFakeBridgePortPair({ routeGrants: ['navigate', 'storage'] })
     const reader = await mountReader(pair)
     const before = pair.toShell.length
     const read = reader.readText().catch((error: unknown) => error)
     await pair.flush()
-    expect(String(await read)).toMatch(/did not grant native\.clipboard\.read/)
+    expect(String(await read)).toMatch(/did not grant/)
     expect(pair.toShell).toHaveLength(before)
+  })
+
+  /**
+   * The image, which crosses as a handle and then as chunks.
+   *
+   * `native.clipboard.read` admits only `text`, so an image mime is `invalid-params` rather than a
+   * refusal of its own, and a 24 MiB base64 image cannot cross an 8 MiB reply cap either way. So
+   * the pasteboard's image is `native.media.pick { source: 'clipboard' }`: the shell stages it, the
+   * bytes come back under the frame cap, and the handle goes back. What the caller sees is the
+   * `{ data, size }` the phone's `getImageAsync` answers.
+   */
+  it('stages the pasteboard image, reads its bytes and gives the handle back', async () => {
+    const shell = createMediaTestShell({
+      staged: { clipboard: [{ bytes: stagedTestBytes(40), width: 120, height: 90 }] }
+    })
+    const pair = createFakeBridgePortPair({ serveNativeVerb: shell.serveNativeVerb })
+    const reader = await mountReader(pair)
+
+    const read = reader.readImage()
+    await pair.flush()
+
+    await expect(read).resolves.toEqual({
+      data: encodeTestBase64(stagedTestBytes(40)),
+      size: { width: 120, height: 90 }
+    })
+    expect(shell.released).toEqual(['media-1'])
+    expect(pair.rpc.requests).toEqual([])
+  })
+
+  it('answers null for an empty pasteboard, which is the branch the paste already had', async () => {
+    const shell = createMediaTestShell({ staged: {} })
+    const pair = createFakeBridgePortPair({ serveNativeVerb: shell.serveNativeVerb })
+    const reader = await mountReader(pair)
+
+    const read = reader.readImage()
+    await pair.flush()
+
+    await expect(read).resolves.toBeNull()
+    // The pick ran and answered nothing; no read, no release.
+    expect(shell.calls).toEqual(['pick clipboard single'])
+  })
+
+  it('releases every item a clipboard pick answered, not only the one it read', async () => {
+    // `multiple: false` is what the page asks for, not what a shell promises: a caller that took
+    // the first of several would hold the rest against the eight-handle cap until the TTL.
+    const shell = createMediaTestShell({
+      staged: {
+        clipboard: [
+          { bytes: stagedTestBytes(12), width: 4, height: 3 },
+          { bytes: stagedTestBytes(20) }
+        ]
+      }
+    })
+    const pair = createFakeBridgePortPair({ serveNativeVerb: shell.serveNativeVerb })
+    const reader = await mountReader(pair)
+
+    const read = reader.readImage()
+    await pair.flush()
+
+    await expect(read).resolves.toEqual({
+      data: encodeTestBase64(stagedTestBytes(12)),
+      size: { width: 4, height: 3 }
+    })
+    expect(shell.released).toEqual(['media-1', 'media-2'])
+    // The second went back without being read.
+    expect(shell.calls.filter((call) => call.startsWith('read media-2'))).toEqual([])
+  })
+
+  it('rejects the image read on a route that was not granted the pick', async () => {
+    const pair = createFakeBridgePortPair({ routeGrants: ['navigate', 'storage'] })
+    const reader = await mountReader(pair)
+    const before = pair.toShell.length
+    const read = reader.readImage().catch((error: unknown) => error)
+    await pair.flush()
+    // A refused pick and an empty clipboard lead a caller to different screens, so this is not
+    // folded into the null above.
+    expect(String(await read)).toMatch(/did not grant native\.media\.pick/)
+    expect(pair.toShell).toHaveLength(before)
+  })
+
+  /**
+   * `contents` is not a probe here and cannot be one: the shell serves no "is there text" verb, and
+   * reading to find out would raise iOS's paste-consent prompt on every mount and every foreground,
+   * which is the whole reason the phone has `hasStringAsync`. So it answers what this side knows.
+   */
+  it('reports both as possible when the read and media verbs are granted', async () => {
+    const pair = createFakeBridgePortPair()
+    const reader = await mountReader(pair)
+    const before = pair.toShell.length
+    await expect(reader.contents()).resolves.toEqual({ text: true, image: true })
+    await pair.flush()
+    expect(pair.toShell).toHaveLength(before)
+  })
+
+  it('reports nothing at all on a route both were withheld from', async () => {
+    const pair = createFakeBridgePortPair({ routeGrants: ['navigate', 'storage'] })
+    const reader = await mountReader(pair)
+    await expect(reader.contents()).resolves.toEqual({ text: false, image: false })
+  })
+
+  it('reports an image as possible on a route granted the media verbs but not the read', async () => {
+    // Per grant, not on the pair: the two halves of the paste are granted separately and a screen
+    // told its clipboard was empty would never enable the button for either.
+    const pair = createFakeBridgePortPair({
+      routeGrants: ['navigate', 'storage', 'native.media.pick', 'native.media.read']
+    })
+    const reader = await mountReader(pair)
+    await expect(reader.contents()).resolves.toEqual({ text: false, image: true })
+  })
+
+  /**
+   * The read grant on its own is enough to paste, so it is the grant this answers on.
+   *
+   * Asking whether both clipboard verbs are granted is the right question for a screen that copies
+   * and pastes and the wrong one here: a route granted only the read would have been told its
+   * clipboard was empty, and its paste button would never enable.
+   */
+  it('reports text as possible on a route granted the read but not the write', async () => {
+    const pair = createFakeBridgePortPair({
+      routeGrants: ['navigate', 'storage', 'native.clipboard.read']
+    })
+    const reader = await mountReader(pair)
+    await expect(reader.contents()).resolves.toEqual({ text: true, image: false })
+    // And the write still refuses, so the grants really are asymmetric rather than all present.
+    const writer = held.writer
+    if (writer === null) {
+      throw new Error('nothing mounted')
+    }
+    const written = writer.writeText('x').catch((error: unknown) => error)
+    await pair.flush()
+    expect(String(await written)).toMatch(/did not grant/)
   })
 })

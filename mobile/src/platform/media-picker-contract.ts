@@ -6,11 +6,12 @@
  * `native.media.pick` / `read` / `release`. Neither type nor error may live beside an Expo import,
  * because a screen that catches `ImageLibraryPermissionError` would otherwise drag the native
  * picker chain into the page bundle for the sake of one `instanceof`.
+ *
+ * The pasteboard is not here: `platform/clipboard.ts` owns it on both platforms, and on the web
+ * its `readImage` reaches the same `native.media.pick` with `source: 'clipboard'`.
  */
-import type { MobileClipboardImage } from '../session/mobile-clipboard-image'
 
-/** Where a picked image comes from. The pasteboard is `readClipboardImage`, not a source here:
- *  its caller wants pixel dimensions and gets no file. */
+/** Where a picked image comes from. The pasteboard is the clipboard seam's, not a source here. */
 export type MobileImageSource = 'library' | 'files'
 
 export type PickedMobileImage = {
@@ -28,10 +29,6 @@ export class ImageLibraryPermissionError extends Error {
   }
 }
 
-/** Re-exported so a caller of `readClipboardImage` has one import rather than two; the type is
- *  the upload path's own, so the two cannot disagree about what it answers. */
-export type { MobileClipboardImage }
-
 /**
  * Picking on whichever half of the app is running.
  *
@@ -46,6 +43,4 @@ export type { MobileClipboardImage }
 export type MediaPicker = {
   pickImage: (source: MobileImageSource) => Promise<PickedMobileImage | null>
   pickImages: (source: MobileImageSource) => AsyncIterable<PickedMobileImage>
-  /** The pasteboard's image, or null when it holds none. */
-  readClipboardImage: () => Promise<MobileClipboardImage | null>
 }

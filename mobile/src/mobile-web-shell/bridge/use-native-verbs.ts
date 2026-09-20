@@ -32,8 +32,24 @@ import {
  * a screen that read a field which is not there.
  */
 export type NativeVerbs = {
-  /** Whether this shell serves the verbs at all; false leaves a caller its own fallback. */
+  /** Whether this shell serves the clipboard verbs at all; false leaves a caller its own fallback. */
   granted: boolean
+  /**
+   * Per verb, because the grants are per verb and a caller usually wants one of them.
+   *
+   * `granted` is both, which is the right question for a screen that copies and pastes and the
+   * wrong one for anything else: a route granted only `native.clipboard.read` reads `granted`
+   * false and would report an empty clipboard rather than one it is allowed to read.
+   */
+  canWriteClipboardText: boolean
+  canReadClipboardText: boolean
+  /**
+   * Whether the shell serves the media verbs, which is the page's only route to an image.
+   *
+   * Read by `contents()` on the clipboard seam, which answers without probing: a route that was
+   * granted the pick may have an image on the pasteboard, and one that was not never can.
+   */
+  canPickMedia: boolean
   writeClipboardText: (value: string) => Promise<boolean>
   readClipboardText: () => Promise<string>
   /** Opens the shell's picker and answers a handle per item; an empty list is a cancelled picker,
@@ -161,8 +177,13 @@ export function useNativeVerbs(): NativeVerbs {
     }
 
     const mime: BridgeClipboardMime = 'text'
+    const canWriteClipboardText = has('native.clipboard.write')
+    const canReadClipboardText = has('native.clipboard.read')
     return {
-      granted: has('native.clipboard.write') && has('native.clipboard.read'),
+      granted: canWriteClipboardText && canReadClipboardText,
+      canWriteClipboardText,
+      canReadClipboardText,
+      canPickMedia: has('native.media.pick') && has('native.media.read'),
       writeClipboardText: async (value) =>
         (await call('native.clipboard.write', { mime, value }, clipboardWriteResultSchema)).written,
       readClipboardText: async () =>

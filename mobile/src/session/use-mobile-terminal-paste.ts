@@ -3,7 +3,6 @@ import { reportWorkerTerminalUserInput } from '../terminal/worker-terminal-takeo
 import { useCallback, type RefObject } from 'react'
 import { terminalInputSend } from '../terminal/mobile-terminal-operations'
 import { useClipboardReader } from '../platform/clipboard'
-import { useMediaPicker } from '../platform/media-picker'
 import type { TerminalModes } from '../terminal/terminal-webview-contract'
 import type { RpcClient } from '../transport/rpc-client'
 import type { ConnectionState } from '../transport/types'
@@ -65,12 +64,10 @@ export function useMobileTerminalPaste({
   refreshCanPaste,
   showToast
 }: UseMobileTerminalPasteOptions): () => Promise<void> {
-  // The pasteboard through the seam: text is `native.clipboard.read` on the page, and an image is
-  // `native.media.pick { source: 'clipboard' }` — never an inline value, because a clipboard image
-  // reaches 24 MiB of base64 against an 8 MiB reply ceiling.
+  // The pasteboard through the seam, both halves: text is `native.clipboard.read` on the page and
+  // an image is `native.media.pick { source: 'clipboard' }`, never an inline value, because a
+  // clipboard image reaches 24 MiB of base64 against an 8 MiB reply ceiling.
   const clipboard = useClipboardReader()
-  const mediaPicker = useMediaPicker()
-
   return useCallback(async () => {
     if (!client || !activeHandle || !canSend) {
       return
@@ -85,7 +82,7 @@ export function useMobileTerminalPaste({
           ptyModesRef.current.get(targetHandle)
         )
       } else {
-        const image = await mediaPicker.readClipboardImage()
+        const image = await clipboard.readImage()
         if (!image) {
           refreshCanPaste()
           return
@@ -153,6 +150,7 @@ export function useMobileTerminalPaste({
   }, [
     activeHandle,
     agent,
+    clipboard,
     activeHandleRef,
     activeSessionTabTypeRef,
     canSend,
@@ -164,7 +162,6 @@ export function useMobileTerminalPaste({
     deviceTokenRef,
     flushPendingLiveInputBeforeExternalSend,
     getActiveWorktreeConnectionId,
-    mediaPicker,
     onError,
     onSuccess,
     ptyModesRef,

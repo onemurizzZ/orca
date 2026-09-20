@@ -2,16 +2,18 @@ import { describe, expect, it, vi } from 'vitest'
 import type { RpcClient } from '../transport/rpc-client'
 import { useMobileTerminalPaste } from './use-mobile-terminal-paste'
 
-vi.mock('react', () => ({ useCallback: (callback: unknown) => callback }))
-// The seam's native half is what the hook now calls, so its two device modules are what a test
-// stands in for: the pasteboard it reads text and images from, and the pickers behind it.
+// `useMemo` joins `useCallback` because the paste now reads the clipboard through the platform
+// seam, which is a hook. Called rather than cached: this test mounts nothing, so there is no
+// render to hold a value across.
+vi.mock('react', () => ({
+  useCallback: (callback: unknown) => callback,
+  useMemo: (factory: () => unknown) => factory()
+}))
+// The clipboard seam's native half is what the hook calls, so the pasteboard is what a test stands
+// in for: text, image and the two probes behind `contents`.
 vi.mock('expo-clipboard', () => ({
   getStringAsync: async () => '',
   getImageAsync: async () => ({ data: 'png' })
-}))
-vi.mock('./mobile-image-source-picker', () => ({
-  pickMobileImage: vi.fn(),
-  pickMobileImages: vi.fn()
 }))
 vi.mock('expo-file-system', () => ({ File: class {}, Paths: {} }))
 vi.mock('expo-image-manipulator', () => ({ ImageManipulator: {}, SaveFormat: {} }))

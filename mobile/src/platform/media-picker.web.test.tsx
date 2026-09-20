@@ -3,7 +3,8 @@
  *
  * Driven through the real port pair against a shell that stages files, so what this reads is the
  * three verbs leaving the page in order and the bytes being reassembled from what came back — the
- * same path the composer's attach button takes.
+ * same path the composer's attach button takes. The pasteboard reaches the same verbs through the
+ * clipboard seam, and is `clipboard.web.test.tsx`'s.
  */
 import type { ReactElement } from 'react'
 import { act, create } from 'react-test-renderer'
@@ -256,52 +257,6 @@ describe('picking media from inside the shell', () => {
 
     expect(String(refused)).toMatch(/answered 12 bytes for an item it declared as 25/)
     expect(shell.released).toEqual(['media-1'])
-  })
-
-  it('carries the pasteboard image and the dimensions the downscale loop reads', async () => {
-    const shell = createMediaTestShell({
-      staged: { clipboard: [{ bytes: stagedTestBytes(40), width: 120, height: 90 }] }
-    })
-    const pair = pairFor(shell)
-    const picker = await mount(pair)
-
-    expect(await settle(pair, picker.readClipboardImage())).toEqual({
-      data: encodeTestBase64(stagedTestBytes(40)),
-      size: { width: 120, height: 90 }
-    })
-    expect(shell.released).toEqual(['media-1'])
-  })
-
-  it('releases every item a clipboard pick answered, not only the one it read', async () => {
-    // `multiple: false` is what the page asks for, not what a shell promises: a caller that took
-    // the first of several would hold the rest against the eight-handle cap until the TTL.
-    const shell = createMediaTestShell({
-      staged: {
-        clipboard: [
-          { bytes: stagedTestBytes(12), width: 4, height: 3 },
-          { bytes: stagedTestBytes(20) }
-        ]
-      }
-    })
-    const pair = pairFor(shell)
-    const picker = await mount(pair)
-
-    expect(await settle(pair, picker.readClipboardImage())).toEqual({
-      data: encodeTestBase64(stagedTestBytes(12)),
-      size: { width: 4, height: 3 }
-    })
-    expect(shell.released).toEqual(['media-1', 'media-2'])
-    // The second went back without being read, exactly as the single-image pick releases it.
-    expect(shell.calls.filter((call) => call.startsWith('read media-2'))).toEqual([])
-  })
-
-  it('answers null for an empty pasteboard without reading anything', async () => {
-    const shell = createMediaTestShell({ staged: {} })
-    const pair = pairFor(shell)
-    const picker = await mount(pair)
-
-    expect(await settle(pair, picker.readClipboardImage())).toBeNull()
-    expect(shell.calls).toEqual(['pick clipboard single'])
   })
 
   /**
