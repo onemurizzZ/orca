@@ -139,12 +139,31 @@ export function mediaPickerSites(source, fileName = 'module.tsx') {
       ts.forEachChild(parsed, learn)
     }
 
+    /**
+     * `Clipboard.getImageAsync` and `Clipboard['getImageAsync']` are the same call.
+     *
+     * Element access with a string literal is the spelling a minifier and a bundler both produce
+     * and the one a reader reaches for to get around a rule about dots. A computed key is not read:
+     * its value is not in the source, and guessing would report a line nobody can act on.
+     */
+    const readsImageOffAlias = (node) => {
+      if (!ts.isIdentifier(node.expression) || !clipboardAliases.has(node.expression.text)) {
+        return false
+      }
+      if (ts.isPropertyAccessExpression(node)) {
+        return node.name.text === CLIPBOARD_IMAGE_READ
+      }
+      return (
+        node.argumentExpression !== undefined &&
+        ts.isStringLiteral(node.argumentExpression) &&
+        node.argumentExpression.text === CLIPBOARD_IMAGE_READ
+      )
+    }
+
     const visit = (node) => {
       if (
-        ts.isPropertyAccessExpression(node) &&
-        ts.isIdentifier(node.expression) &&
-        clipboardAliases.has(node.expression.text) &&
-        node.name.text === CLIPBOARD_IMAGE_READ
+        (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) &&
+        readsImageOffAlias(node)
       ) {
         sites.push(lineOf(node))
       }

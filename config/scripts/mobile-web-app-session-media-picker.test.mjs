@@ -101,6 +101,14 @@ describe('the rule that reads a module for a picker', () => {
       "import * as Clipboard from 'expo-clipboard'\nconst { getImageAsync: readImage } = Clipboard\nexport const r = readImage",
     're-destructured.ts':
       "import * as Clipboard from 'expo-clipboard'\nconst pasteboard = Clipboard\nconst again = pasteboard\nconst { getImageAsync } = again\nexport const r = getImageAsync",
+    'element-access.ts':
+      "import * as Clipboard from 'expo-clipboard'\nexport const r = () => Clipboard['getImageAsync']({ format: 'png' })",
+    // Deliberately back to front: the alias `first` reads from `second`, which is only learned
+    // further down. Valid at run time, because the destructure is inside a function the module
+    // body has finished before anything calls. A walk that learned aliases in source order would
+    // never reach `first`, and this is the fixture that says so.
+    'reverse-order-alias.ts':
+      "import * as Clipboard from 'expo-clipboard'\nexport function read() {\n  const { getImageAsync } = first\n  return getImageAsync\n}\nconst first = second\nconst second = Clipboard",
     'clipboard-text.ts':
       "import * as Clipboard from 'expo-clipboard'\nexport const r = () => Clipboard.getStringAsync()",
     'destructured-text.ts':
@@ -122,10 +130,12 @@ describe('the rule that reads a module for a picker', () => {
         'src/destructured-renamed.ts:2',
         'src/destructured.ts:2',
         'src/documents.ts:1',
+        'src/element-access.ts:2',
         'src/namespace-picker.ts:1',
         'src/re-destructured.ts:4',
         'src/re-export.ts:1',
         'src/renamed-image-read.ts:1',
+        'src/reverse-order-alias.ts:3',
         'src/side-effect.ts:1'
       ])
     } finally {

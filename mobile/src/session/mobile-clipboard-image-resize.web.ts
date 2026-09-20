@@ -41,7 +41,8 @@ export const resizeMobileClipboardImage: MobileClipboardImageResizer = async (so
   if (resized.length === 0) {
     throw new Error('Failed to encode resized clipboard image')
   }
-  // The canvas's own size rather than the target: a browser clamps a canvas past its area limit,
-  // and a caller told the size it asked for would loop on a raster that never shrank.
+  // Read back off the canvas rather than echoed from `target`. The two are the same number today,
+  // because a browser reflects the width it was assigned; the point is that the size and the bytes
+  // come from one element, so a caller's bookkeeping cannot describe a raster that was not encoded.
   return { data: resized, width: canvas.width, height: canvas.height }
 }
