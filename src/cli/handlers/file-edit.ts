@@ -7,6 +7,7 @@ import { printResult } from '../format'
 import { MAX_TIMER_DELAY_MS } from '../../shared/timer-delay'
 import type { ExternalEditorResult } from '../../shared/external-editor'
 
+/** External editor callers must wait for completed disk writes before re-reading their input. */
 export const editFile: CommandHandler = async (ctx) => {
   // The SSH shim runs on the desktop, but its paths belong to the remote host.
   if (ctx.client.isRemote || process.env.ORCA_CLI_CWD) {

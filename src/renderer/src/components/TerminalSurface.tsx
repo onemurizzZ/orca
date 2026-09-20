@@ -5,6 +5,7 @@ import { TerminalLegacyWorkspaceSurface } from './TerminalLegacyWorkspaceSurface
 import { TerminalWorkspaceDialogs } from './TerminalWorkspaceDialogs'
 import type { TerminalController } from './use-terminal-controller'
 
+/** App-wide persistence must remain independent of workbench visibility. */
 export function TerminalSurface({
   controller
 }: {

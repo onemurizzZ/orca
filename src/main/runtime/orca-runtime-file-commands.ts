@@ -25,6 +25,7 @@ import type { RuntimeLeafRecord } from './runtime-terminal-state-records'
 import type { ExternalEditorResult } from '../../shared/external-editor'
 
 export class OrcaRuntimeWithFileCommands extends OrcaRuntimeWithPreservedBranchCleanup {
+  /** Only desktop owners can prove that a user closed an editor tab. */
   async editLocalFile(
     filePath: string,
     wait: boolean,

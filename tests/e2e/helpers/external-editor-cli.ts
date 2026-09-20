@@ -3,6 +3,7 @@ import path from 'node:path'
 import type { Page, TestInfo } from '@stablyai/playwright-test'
 import { runProcess } from '../../../src/shared/child-process/run-process'
 
+/** A real child process proves that completion reaches the external caller through IPC. */
 export function startExternalEditorCli(userDataDir: string, args: string[]) {
   const controller = new AbortController()
   let finished = false
@@ -41,6 +42,7 @@ export function startExternalEditorCli(userDataDir: string, args: string[]) {
   }
 }
 
+/** CDP capture keeps verification from activating the user's desktop windows. */
 export async function captureExternalEditorEvidence(page: Page, testInfo: TestInfo, name: string) {
   const session = await page.context().newCDPSession(page)
   try {

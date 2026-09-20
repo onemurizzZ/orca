@@ -22,6 +22,7 @@ type EditorWindow = {
   webContents: EditorRenderer
 }
 
+/** Treat renderer loss as failure to protect callers waiting for saved content. */
 export async function requestExternalEditor(
   mainWindow: EditorWindow,
   filePath: string,

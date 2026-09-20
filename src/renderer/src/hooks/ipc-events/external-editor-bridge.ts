@@ -8,6 +8,7 @@ import {
   type ExternalEditorRequest
 } from '../../../../shared/external-editor'
 
+/** Observe tab lifetime on the desktop that owns the caller's local file. */
 export function registerExternalEditorBridge(unsubs: (() => void)[]): void {
   const api = window.api.ui
   if (!api.onExternalEditorRequest || !api.onExternalEditorCancel || !api.respondExternalEditor) {
@@ -15,10 +16,12 @@ export function registerExternalEditorBridge(unsubs: (() => void)[]): void {
   }
   const respond = api.respondExternalEditor
   const pending = new Map<string, () => void>()
+  /** Caller cancellation releases observation while user edits still belong to the open tab. */
   const cancel = (requestId: string): void => {
     pending.get(requestId)?.()
     pending.delete(requestId)
   }
+  /** Enable the floating workspace before acknowledging a request that could otherwise stay hidden. */
   const open = async (request: ExternalEditorRequest): Promise<void> => {
     let cancelled = false
     pending.set(request.requestId, () => {

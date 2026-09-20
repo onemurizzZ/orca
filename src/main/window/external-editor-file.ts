@@ -5,6 +5,7 @@ import { hasBinaryFileExtension } from '../../shared/binary-file-extensions'
 
 const MAX_EXTERNAL_EDITOR_BYTES = 1024 * 1024
 
+/** Validate the selected file before granting session-wide filesystem access. */
 export async function authorizeExternalEditorFile(filePath: string): Promise<string> {
   if (!isAbsolute(filePath)) {
     throw new Error('An absolute file path is required.')
