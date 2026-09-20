@@ -122,20 +122,27 @@ export function useMediaPicker(): MediaPicker {
         }
       }),
       readClipboardImage: async (): Promise<MobileClipboardImage | null> => {
-        const [item] = await verbs.pickMedia('clipboard', false)
-        if (item === undefined) {
+        const picked = await verbs.pickMedia('clipboard', false)
+        const [image] = picked
+        if (image === undefined) {
           return null
         }
         try {
           return {
-            data: await readItem(verbs, item),
+            data: await readItem(verbs, image),
             // Zero when the pasteboard reported no dimensions, which is what the downscale loop
             // already reads as "cannot resize this": the upload path's own size check then refuses
             // an image too large rather than this seam guessing a raster size for it.
-            size: { width: item.width ?? 0, height: item.height ?? 0 }
+            size: { width: image.width ?? 0, height: image.height ?? 0 }
           }
         } finally {
-          await releaseQuietly(verbs, item.handle)
+          // Every item this pick answered, not only the one read. `multiple: false` is what the
+          // page asks for and not what a shell promises, so a caller reading the first of several
+          // would hold the rest against the eight-handle cap until the TTL — the same guard
+          // `pickImage` gets from `readPicked`.
+          for (const item of picked) {
+            await releaseQuietly(verbs, item.handle)
+          }
         }
       }
     }),

@@ -272,6 +272,29 @@ describe('picking media from inside the shell', () => {
     expect(shell.released).toEqual(['media-1'])
   })
 
+  it('releases every item a clipboard pick answered, not only the one it read', async () => {
+    // `multiple: false` is what the page asks for, not what a shell promises: a caller that took
+    // the first of several would hold the rest against the eight-handle cap until the TTL.
+    const shell = createMediaTestShell({
+      staged: {
+        clipboard: [
+          { bytes: stagedTestBytes(12), width: 4, height: 3 },
+          { bytes: stagedTestBytes(20) }
+        ]
+      }
+    })
+    const pair = pairFor(shell)
+    const picker = await mount(pair)
+
+    expect(await settle(pair, picker.readClipboardImage())).toEqual({
+      data: encodeTestBase64(stagedTestBytes(12)),
+      size: { width: 4, height: 3 }
+    })
+    expect(shell.released).toEqual(['media-1', 'media-2'])
+    // The second went back without being read, exactly as the single-image pick releases it.
+    expect(shell.calls.filter((call) => call.startsWith('read media-2'))).toEqual([])
+  })
+
   it('answers null for an empty pasteboard without reading anything', async () => {
     const shell = createMediaTestShell({ staged: {} })
     const pair = pairFor(shell)
@@ -281,24 +304,28 @@ describe('picking media from inside the shell', () => {
     expect(shell.calls).toEqual(['pick clipboard single'])
   })
 
-  it('rejects a refused pick rather than answering the empty list a cancel answers', async () => {
+  /**
+   * Every refusal a pick can answer with, through one path.
+   *
+   * The cap is the registry's, raised before a picker runs; the ceiling is ruling 6c's, raised
+   * once a picked item has been weighed. Both cross as an `error` frame and both have to reach the
+   * caller as a reason it can switch on, because an empty list would have told it the user changed
+   * their mind — and a code outside the seam's vocabulary floors instead of crossing verbatim.
+   */
+  it.each([
+    ['native_media_handle_cap', 'this page is holding every staged item it may'],
+    ['native_media_too_large', 'a picked item is 20000000 bytes, over what this shell stages']
+  ] as const)('rejects a pick the shell refused as %s', async (code, message) => {
     const shell = createMediaTestShell({
       staged: {},
-      refusePick: new BridgeNativeVerbRefusedError(
-        'native_media_handle_cap',
-        'this page is holding every staged item it may'
-      )
+      refusePick: new BridgeNativeVerbRefusedError(code, message)
     })
     const pair = pairFor(shell)
     const picker = await mount(pair)
 
     const refused = await settle(pair, picker.pickImage('library')).catch((error: unknown) => error)
-    // The seam's own error, carrying the shell's reason: a caller switches on this, and an empty
-    // list would have told it the user changed their mind.
     expect(refused).toBeInstanceOf(NativeVerbError)
-    expect(refused instanceof NativeVerbError ? refused.reason : null).toBe(
-      'native_media_handle_cap'
-    )
+    expect(refused instanceof NativeVerbError ? refused.reason : null).toBe(code)
   })
 
   it('rejects on a route that was not granted the verb, without sending a frame', async () => {
