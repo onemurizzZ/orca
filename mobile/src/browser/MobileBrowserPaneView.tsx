@@ -29,17 +29,7 @@ import type {
 } from './browser-touch-geometry'
 import type { MobileBrowserViewMode } from './browser-screencast-request'
 import type { MobileBrowserTab } from './MobileBrowserPane'
-
-/**
- * The pane's chrome and the surface the frames paint into.
- *
- * "Never dark" holds only for a page that produces some frame that fits: with every frame over the
- * cap the pane sits on its busy spinner over an unpainted viewport, which the C6.6 device proof
- * measured with the area budget forced off — 299 dropped, 6 applied, the stream alive and no error
- * state, and nothing to look at. That is C6 ruling 1 working as written, not a failure of it: a
- * frame that does not fit is dropped rather than ending the stream. It is what the area budget
- * exists to keep from happening.
- */
+import type { BrowserDialogState } from './mobile-browser-stream-events'
 
 type MobileBrowserPaneViewProps = {
   addressFocused: boolean
@@ -49,7 +39,7 @@ type MobileBrowserPaneViewProps = {
   browserViewMode: MobileBrowserViewMode
   busy: boolean
   controlsDisabled: boolean
-  dialog: { dialogType: string; message: string } | null
+  dialog: BrowserDialogState | null
   error: string | null
   frameGeometry: BrowserFrameGeometry | null
   frameLayerErrorHandler: (layer: FrameLayer) => () => void
@@ -80,6 +70,16 @@ type MobileBrowserPaneViewProps = {
   zoom: BrowserZoomState
 }
 
+/**
+ * The pane's chrome and the surface the frames paint into.
+ *
+ * "Never dark" holds only for a page that produces some frame that fits: with every frame over the
+ * cap this sits on its busy spinner over an unpainted viewport, which the C6.6 device proof
+ * measured with the area budget forced off — 299 dropped, 6 applied, the stream alive and no error
+ * state, and nothing to look at. That is C6 ruling 1 working as written, not a failure of it: a
+ * frame that does not fit is dropped rather than ending the stream. It is what the area budget
+ * exists to keep from happening.
+ */
 export function MobileBrowserPaneView(props: MobileBrowserPaneViewProps) {
   const {
     addressFocused,
@@ -262,6 +262,8 @@ export function MobileBrowserPaneView(props: MobileBrowserPaneViewProps) {
             <View style={styles.dialogCard}>
               <Text style={styles.dialogTitle}>Browser Dialog</Text>
               <Text style={styles.dialogMessage}>{dialog.message}</Text>
+              {/* The page is still blocked, so the buttons stay live and the card says why. */}
+              {dialog.error ? <Text style={styles.dialogError}>{dialog.error}</Text> : null}
               <View style={styles.dialogActions}>
                 {dialog.dialogType !== 'alert' ? (
                   <Pressable

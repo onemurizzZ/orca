@@ -191,6 +191,34 @@ describe('the pane keeps its dialog card until the page is unblocked', () => {
     expect(cardMessages(pane.renderer)).not.toContain('second')
   })
 
+  it('keeps the card pressable and says so when the answer does not reach the page', async () => {
+    const pane = await openPaneOverTheBridge()
+    await act(async () => {
+      pane.page.start()
+      await pane.flush()
+    })
+    expect(cardMessages(pane.renderer)).toContain('first')
+
+    pressButton(pane.renderer, 'OK')
+    await pane.flush()
+    const refused = pane.rpc.requests.at(-1)
+    await act(async () => {
+      refused?.reject(new Error('the host refused'))
+      await pane.flush()
+    })
+
+    // The page never took the answer, so the alert is still up and the card says why.
+    expect(cardMessages(pane.renderer)).toContain('first')
+    expect(cardMessages(pane.renderer)).toContain('That answer did not reach the page.')
+
+    // And the button still works: the retry reaches the host, which answers, and the page moves on.
+    pressButton(pane.renderer, 'OK')
+    await pane.flush()
+    await pane.answerFromTheHost(true)
+    expect(cardMessages(pane.renderer)).toContain('second')
+    expect(cardMessages(pane.renderer)).not.toContain('That answer did not reach the page.')
+  })
+
   it('answers the confirm with Cancel', async () => {
     const pane = await openPaneOverTheBridge()
     await act(async () => {

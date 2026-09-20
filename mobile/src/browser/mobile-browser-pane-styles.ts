@@ -103,6 +103,12 @@ export const mobileBrowserPaneStyles = StyleSheet.create({
     lineHeight: 20,
     marginTop: spacing.sm
   },
+  dialogError: {
+    color: colors.statusRed,
+    fontSize: typography.metaSize,
+    lineHeight: 18,
+    marginTop: spacing.sm
+  },
   dialogActions: {
     flexDirection: 'row',
     justifyContent: 'flex-end',

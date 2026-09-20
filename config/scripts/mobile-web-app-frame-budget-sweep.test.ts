@@ -101,14 +101,7 @@ beforeAll(async () => {
   const context = await browser.newContext()
   page = await context.newPage()
   cdp = await context.newCDPSession(page)
-  // A viewport meta, so the page lays out at the emulated width instead of Chromium's 980 px
-  // default. Without it the canvas is scaled into the frame, the noise averages away, and the
-  // sweep reads about 0.12 bytes per pixel — a fifth of the truth.
-  await page.setContent(
-    '<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1">' +
-      '<style>html,body{margin:0;overflow:hidden;background:#000}canvas{display:block}</style>' +
-      '</head><body><canvas id="noise"></canvas></body></html>'
-  )
+  await page.setContent(noiseDocument({ viewportMeta: true }))
 }, 120_000)
 
 afterAll(async () => {
@@ -116,26 +109,45 @@ afterAll(async () => {
 })
 
 /**
+ * The page the noise is painted on. The viewport meta is the arm the guard case removes.
+ */
+function noiseDocument({ viewportMeta }: { viewportMeta: boolean }): string {
+  const meta = viewportMeta
+    ? '<meta name="viewport" content="width=device-width, initial-scale=1">'
+    : ''
+  const style =
+    '<style>html,body{margin:0;overflow:hidden;background:#000}canvas{display:block}</style>'
+  return `<!doctype html><html><head>${meta}${style}</head><body><canvas id="noise"></canvas></body></html>`
+}
+
+/**
  * A noise JPEG at the quality the pane ships, encoded by Chromium's screencast, in bytes.
  *
- * The frame is emulated at one device pixel per CSS pixel and the canvas is painted at that same
- * size, so every pixel of noise reaches the encoder unaveraged. Emulating the pane's own device
- * scale factor instead would not: headless Chromium composites at the DIP surface size whatever
- * `deviceScaleFactor` says, so the canvas would be downscaled into the frame and the sweep would
- * read about a fifth of the real cost. What the constant measures is bytes per pixel of noise at
- * this quality, and the encoder does not care which surface those pixels came from.
+ * `Emulation.setDeviceMetricsOverride` here sizes the surface and nothing else. Its
+ * `deviceScaleFactor` is required by the command and inert to this measurement: headless Chromium
+ * composites at the DIP surface size whatever the factor says, so the sweep returns the same
+ * 0.543986 / 0.552964 to six decimals at a factor of 1 and at 3. Measured 2026-09-20; the frame is
+ * therefore requested at one device pixel per CSS pixel and the canvas painted at that same size,
+ * which is how every pixel of noise reaches the encoder unaveraged.
+ *
+ * What does guard the measurement is the document's viewport meta, without which the page lays out
+ * at Chromium's 980 px default, the canvas is scaled into the frame and the noise averages away.
+ * That is not left to this comment: the floor assertion in the sweep below is what catches it, and
+ * `a page without the viewport meta reads far under the floor` is what proves the floor catches it.
  *
  * The quality is read, not retyped: at 90 every budgeted viewport posts over the cap.
  */
 async function screencastNoiseJpegBytes(
   frame: { width: number; height: number },
-  seed: number
+  seed: number,
+  target: { page: Page; cdp: CDPSession } | null = null
 ): Promise<number> {
-  if (page === null || cdp === null) {
+  const resolved = target ?? (page !== null && cdp !== null ? { page, cdp } : null)
+  if (resolved === null) {
     throw new Error('the sweep has no page')
   }
-  const session = cdp
-  const sheet = page
+  const session = resolved.cdp
+  const sheet = resolved.page
   await session.send('Emulation.setDeviceMetricsOverride', {
     width: frame.width,
     height: frame.height,
@@ -323,6 +335,31 @@ describeSweep('the frame budget across the viewport range', () => {
     expect(frame.scale).toBe(1)
     const imageBytes = await screencastNoiseJpegBytes(frame, 1)
     expect(postThroughShell(new Uint8Array(imageBytes), frame)).toBeNull()
+  }, 120_000)
+
+  it('reads far under the floor without the viewport meta, which is what the floor guards', async () => {
+    if (browser === null) {
+      throw new Error('the sweep has no browser')
+    }
+    // The same frame, the same noise, the same encoder — one arm short of the meta. Chromium then
+    // lays the page out at its 980 px default and scales the canvas into the frame, so what the
+    // encoder sees is averaged noise rather than noise. Without a case saying so, the sweep could
+    // measure that and still pass every assertion above by being comfortably under the constant.
+    const frame = { width: 768, height: 1133 }
+    const context = await browser.newContext()
+    try {
+      const bare = await context.newPage()
+      const session = await context.newCDPSession(bare)
+      await bare.setContent(noiseDocument({ viewportMeta: false }))
+      const bytes = await screencastNoiseJpegBytes(frame, 4_242, { page: bare, cdp: session })
+      const bytesPerPixel = bytes / (frame.width * frame.height)
+
+      expect(bytesPerPixel).toBeLessThan(0.3)
+      // And the floor the sweep asserts is above it, so that assertion is what fails first.
+      expect(bytesPerPixel).toBeLessThan(0.5)
+    } finally {
+      await context.close()
+    }
   }, 120_000)
 
   it('never asks for more density than native, anywhere in the range', () => {

@@ -2,7 +2,8 @@ import type { Dispatch, SetStateAction } from 'react'
 import { displayBrowserUrl } from './browser-url'
 import { shouldSurfaceBrowserError } from './mobile-browser-frame-state'
 
-export type BrowserDialogState = { dialogType: string; message: string }
+/** `error` is set when an answer did not reach the page, which leaves the page still blocked. */
+export type BrowserDialogState = { dialogType: string; message: string; error?: string }
 
 export type ScreencastEvent = {
   type?: string

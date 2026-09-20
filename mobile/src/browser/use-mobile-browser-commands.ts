@@ -22,6 +22,7 @@ import {
   type BrowserZoomState
 } from './browser-touch-geometry'
 import type { BrowserPointerModifier } from './MobileBrowserPointerModifiers'
+import type { BrowserDialogState } from './mobile-browser-stream-events'
 
 const TOUCH_CLICK_RADIUS_DIP = 14
 type PendingWheelCommand = {
@@ -45,6 +46,7 @@ type MobileBrowserCommandArgs = {
   pageParams: () => BrowserPageParams | null
   pointerModifiers: BrowserPointerModifier[]
   sendBrowserRequest: SendBrowserRequest
+  setDialog: Dispatch<SetStateAction<BrowserDialogState | null>>
   setError: Dispatch<SetStateAction<string | null>>
   setKeyboardValue: Dispatch<SetStateAction<string>>
   setPointerModifiers: Dispatch<SetStateAction<BrowserPointerModifier[]>>
@@ -61,6 +63,7 @@ export function useMobileBrowserCommands(args: MobileBrowserCommandArgs) {
     pageParams,
     pointerModifiers,
     sendBrowserRequest,
+    setDialog,
     setError,
     setKeyboardValue,
     setPointerModifiers,
@@ -248,9 +251,18 @@ export function useMobileBrowserCommands(args: MobileBrowserCommandArgs) {
   const sendDialogCommand = useCallback(
     async (method: 'browser.dialogAccept' | 'browser.dialogDismiss') => {
       const command = method === 'browser.dialogAccept' ? browserDialogAccept : browserDialogDismiss
-      await sendBrowserRequest(
+      const result = await sendBrowserRequest(
         async (rpc, page, options) => command.interpret(await command.request(rpc, page, options)),
         { suppressError: true, timeoutMs: 5_000 }
+      )
+      if (result !== null) {
+        return
+      }
+      // A refused or timed-out answer leaves the page blocked on the same dialog, so the card
+      // stays and says so rather than looking like a button that does nothing. The updater is what
+      // keeps a late failure from reopening a card the page has since closed.
+      setDialog((current) =>
+        current === null ? null : { ...current, error: 'That answer did not reach the page.' }
       )
     },
     [sendBrowserRequest]
