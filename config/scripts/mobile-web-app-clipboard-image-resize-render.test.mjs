@@ -18,12 +18,19 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import * as esbuild from 'esbuild'
 import { chromium } from 'playwright-core'
 import { mobileWebAppDependenciesPresent } from './mobile-web-app-bundle-dependencies.mjs'
-import { createBundleServer, readShellCsp } from './mobile-web-app-render-harness.mjs'
+import {
+  createBundleServer,
+  readClipboardImageUploadChunkBase64Chars,
+  readShellCsp
+} from './mobile-web-app-render-harness.mjs'
 
 const mobileDir = fileURLToPath(new URL('../../mobile', import.meta.url))
 
-/** The budget the run is held to: the chunk the upload path already sends, in base64 characters. */
-const UPLOAD_CHUNK_BASE64_CHARS = 512 * 1024
+/**
+ * The budget the run is held to: the chunk the upload path already sends, in base64 characters,
+ * read from the module that defines it rather than written down a second time.
+ */
+let uploadChunkBase64Chars = null
 
 /** Noise at this size encodes to more base64 than the chunk above, so the loop has work to do. */
 const FIXTURE = { width: 1400, height: 1000 }
@@ -117,6 +124,7 @@ beforeAll(async () => {
     return
   }
   const cspHeader = await readShellCsp()
+  uploadChunkBase64Chars = await readClipboardImageUploadChunkBase64Chars()
   // Inside mobile/ rather than the system temp dir: the entry resolves the session modules beside
   // it, and esbuild resolves a bare specifier from the importer upward.
   await mkdir(join(mobileDir, '.tmp'), { recursive: true })
@@ -200,15 +208,15 @@ describeResize(
       try {
         const measured = await page.evaluate((args) => globalThis.__orcaResizeCheck(args), {
           ...FIXTURE,
-          maxBase64Length: UPLOAD_CHUNK_BASE64_CHARS,
+          maxBase64Length: uploadChunkBase64Chars,
           attempts: 3
         })
 
         // The fixture is over the budget, so the loop had something to do: a run that started
         // under it would pass this file with the resizer removed.
 
-        expect(measured.sourceBase64Length).toBeGreaterThan(UPLOAD_CHUNK_BASE64_CHARS)
-        expect(measured.resultBase64Length).toBeLessThanOrEqual(UPLOAD_CHUNK_BASE64_CHARS)
+        expect(measured.sourceBase64Length).toBeGreaterThan(uploadChunkBase64Chars)
+        expect(measured.resultBase64Length).toBeLessThanOrEqual(uploadChunkBase64Chars)
         // Still a PNG a browser can read, at the size the last resize reported: a canvas that
         // encoded nothing, or reported a size it had not drawn, would be caught here.
         const last = measured.resizes.at(-1)
