@@ -310,6 +310,33 @@ const waitForPaint = (page, count) =>
     { timeout: 15_000 }
   )
 
+/** Which of the pane's two layers is on screen, by its position among them. */
+async function visibleLayerIndex(page) {
+  const layers = await readPaintedLayers(page)
+  return layers.findIndex((layer) => layer.opacity === '1')
+}
+
+/**
+ * Waits for the page's own applied-frame signal: the double buffer's flip.
+ *
+ * `applyFrame` writes the next frame's URI onto the hidden layer as soon as the frame lands and
+ * only flips the opacity once the decode resolves, so "some painted layer carries a new digest" is
+ * true before the frame is on screen. Measured here on 2026-09-20: the write landed at 80.7 ms
+ * after the emit and the flip at 85.7 ms, a 5 ms window in which a wait on the digest returns and
+ * the visible layer is still the previous frame. That is what made this file fail once in CI with
+ * the second frame's digest equal to the first's and no console errors.
+ *
+ * The flip is one opacity write, at `settleBrowserFrameLayer`, and it is the behaviour under test
+ * rather than a proxy for it, so waiting on it can neither return early nor depend on how long a
+ * decode takes. Asserting the exact layer, not merely a change, keeps a pane with nothing visible
+ * from reading as a flip.
+ */
+async function waitForLayerFlip(page, staleIndex) {
+  await expect
+    .poll(() => visibleLayerIndex(page), { timeout: 15_000, interval: 25 })
+    .toBe(1 - staleIndex)
+}
+
 describePane('the browser pane in a page', () => {
   /**
    * Zero, which it was not until the Zod jitless flag moved into the bundler banner.
@@ -369,20 +396,12 @@ describePane('the browser pane in a page', () => {
       await emitFrame(view.page, { b64: first, frameSeq: 1, ...FRAME })
       await waitForPaint(view.page, 1)
       const before = await readPaintedLayers(view.page)
+      const staleIndex = before.findIndex((layer) => layer.opacity === '1')
 
       const second = await encodeNoiseJpeg(view.page, { ...FRAME, seed: 99 })
       expect(second).not.toBe(first)
       await emitFrame(view.page, { b64: second, frameSeq: 2, ...FRAME })
-      await view.page.waitForFunction(
-        (stale) =>
-          [...document.querySelectorAll('*')].some(
-            (element) =>
-              element.style?.backgroundImage?.startsWith('url("data:image/jpeg') &&
-              element.style.backgroundImage.slice(-24) !== stale
-          ),
-        before[0].digest,
-        { timeout: 15_000 }
-      )
+      await waitForLayerFlip(view.page, staleIndex)
 
       const after = await readPaintedLayers(view.page)
       const visible = after.filter((layer) => layer.opacity === '1')
@@ -403,6 +422,7 @@ describePane('the browser pane in a page', () => {
       await emitFrame(view.page, { b64: small, frameSeq: 1, ...FRAME })
       await waitForPaint(view.page, 1)
       const before = await readPaintedLayers(view.page)
+      const staleIndex = before.findIndex((layer) => layer.opacity === '1')
 
       // Noise at the largest layout the clamps admit, which §1 measured at 574% of the cap.
       const huge = await encodeNoiseJpeg(view.page, { ...OVER_CAP_FRAME, seed: 5 })
@@ -414,16 +434,7 @@ describePane('the browser pane in a page', () => {
       // The stream is still open: the next frame arrives on the same subscription and paints.
       const next = await encodeNoiseJpeg(view.page, { ...FRAME, seed: 11 })
       expect(await emitFrame(view.page, { b64: next, frameSeq: 3, ...FRAME })).toBe('posted')
-      await view.page.waitForFunction(
-        (stale) =>
-          [...document.querySelectorAll('*')].some(
-            (element) =>
-              element.style?.backgroundImage?.startsWith('url("data:image/jpeg') &&
-              element.style.backgroundImage.slice(-24) !== stale
-          ),
-        before[0].digest,
-        { timeout: 15_000 }
-      )
+      await waitForLayerFlip(view.page, staleIndex)
 
       expect(await view.page.evaluate(() => globalThis.__orcaRenderCheckDroppedFrames)).toEqual([2])
       expect(await view.page.evaluate(() => globalThis.__orcaRenderCheckSubscribes.length)).toBe(1)
