@@ -46,6 +46,26 @@ describeClosure(
       expect(closure.local).not.toContain('src/session/mobile-image-source-picker.ts')
     })
 
+    it('carries none of the four native media modules at all', async () => {
+      const closure = await mobileWebAppRouteClosure(SESSION)
+      // Beyond the source rule: the seam and the canvas resize together take the pickers, the
+      // manipulator and the file system out of the bundle rather than leaving them in it unused.
+      // Each is a native module whose web build is absent or a stub, and `expo-file-system` was
+      // here only to read a picked file and to hold the manipulator's temp PNG.
+      for (const absent of [
+        'expo-image-picker',
+        'expo-document-picker',
+        'expo-image-manipulator',
+        'expo-file-system'
+      ]) {
+        expect(
+          closure.modules.filter((module) => module.includes(`/${absent}/`)),
+          absent
+        ).toEqual([])
+      }
+      expect(closure.local).toContain('src/session/mobile-clipboard-image-resize.web.ts')
+    })
+
     it('is big enough that finding nothing would mean something', async () => {
       const closure = await mobileWebAppRouteClosure(SESSION)
       // The largest route of the series; a closure that collapsed would pass every rule above by
