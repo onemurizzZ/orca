@@ -45,7 +45,6 @@ type MobileBrowserCommandArgs = {
   pageParams: () => BrowserPageParams | null
   pointerModifiers: BrowserPointerModifier[]
   sendBrowserRequest: SendBrowserRequest
-  setDialog: Dispatch<SetStateAction<{ dialogType: string; message: string } | null>>
   setError: Dispatch<SetStateAction<string | null>>
   setKeyboardValue: Dispatch<SetStateAction<string>>
   setPointerModifiers: Dispatch<SetStateAction<BrowserPointerModifier[]>>
@@ -62,7 +61,6 @@ export function useMobileBrowserCommands(args: MobileBrowserCommandArgs) {
     pageParams,
     pointerModifiers,
     sendBrowserRequest,
-    setDialog,
     setError,
     setKeyboardValue,
     setPointerModifiers,
@@ -245,9 +243,10 @@ export function useMobileBrowserCommands(args: MobileBrowserCommandArgs) {
     [sendBrowserRequest]
   )
 
+  // The card is the page's block, not an overlay of the pane's: the host's `dialogClosed` is what
+  // says the page took the answer, so clearing it on the press would report one it never got.
   const sendDialogCommand = useCallback(
     async (method: 'browser.dialogAccept' | 'browser.dialogDismiss') => {
-      setDialog(null)
       const command = method === 'browser.dialogAccept' ? browserDialogAccept : browserDialogDismiss
       await sendBrowserRequest(
         async (rpc, page, options) => command.interpret(await command.request(rpc, page, options)),

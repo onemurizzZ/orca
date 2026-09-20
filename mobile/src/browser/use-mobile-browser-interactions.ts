@@ -50,7 +50,6 @@ type MobileBrowserInteractionArgs = {
   pinchRef: { current: PinchGesture | null }
   pointerModifiers: BrowserPointerModifier[]
   sendBrowserRequest: SendBrowserRequest
-  setDialog: Dispatch<SetStateAction<{ dialogType: string; message: string } | null>>
   setError: Dispatch<SetStateAction<string | null>>
   setKeyboardValue: Dispatch<SetStateAction<string>>
   scrollingRef: { current: boolean }
@@ -77,7 +76,6 @@ export function useMobileBrowserInteractions(args: MobileBrowserInteractionArgs)
     pointerModifiers,
     scrollingRef,
     sendBrowserRequest,
-    setDialog,
     setError,
     setKeyboardValue,
     setPointerModifiers,
@@ -105,7 +103,6 @@ export function useMobileBrowserInteractions(args: MobileBrowserInteractionArgs)
     pageParams,
     pointerModifiers,
     sendBrowserRequest,
-    setDialog,
     setError,
     setKeyboardValue,
     setPointerModifiers,

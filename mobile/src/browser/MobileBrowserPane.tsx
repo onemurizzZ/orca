@@ -277,7 +277,6 @@ export function MobileBrowserPane({
       sendBrowserRequest,
       scrollingRef,
       startPointRef,
-      setDialog,
       setError,
       setKeyboardValue,
       setPointerModifiers,
