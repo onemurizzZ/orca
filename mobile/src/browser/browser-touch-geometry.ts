@@ -20,6 +20,15 @@ export type BrowserFrameGeometry = {
   offsetX: number
   offsetY: number
   scale: number
+  /**
+   * What the frame's device pixels divide by to reach the page's own CSS pixels.
+   *
+   * Mobile view emulates a phone viewport, and a page with no `<meta name="viewport">` lays out at
+   * Chromium's 980 px default and is scaled into it, so the two spaces differ by this much. The
+   * browser's input commands take page CSS pixels, which is why nothing may be sent in the frame's
+   * space. One in web view mode, where no emulation is on.
+   */
+  pageScale: number
 }
 
 export type BrowserZoomState = {
@@ -44,6 +53,7 @@ export function computeBrowserFrameGeometry(
   const renderedWidth = sourceWidth * scale
   const renderedHeight = sourceHeight * scale
   return {
+    pageScale: getPositiveFiniteNumber(metadata?.pageScaleFactor) ?? 1,
     sourceWidth,
     sourceHeight,
     viewportWidth: layout.width,
@@ -79,16 +89,18 @@ export function mapScreenToBrowserPoint(
   ) {
     return null
   }
+  // Why no scrollOffsetX/Y: the frame is the visual viewport and the input commands take
+  // viewport-relative CSS pixels, so adding the page's scroll would aim a screenful past the target.
   return {
     x: clamp(
-      Math.round((localX / geometry.renderedWidth) * geometry.sourceWidth),
+      Math.round(((localX / geometry.renderedWidth) * geometry.sourceWidth) / geometry.pageScale),
       0,
-      geometry.sourceWidth
+      geometry.sourceWidth / geometry.pageScale
     ),
     y: clamp(
-      Math.round((localY / geometry.renderedHeight) * geometry.sourceHeight),
+      Math.round(((localY / geometry.renderedHeight) * geometry.sourceHeight) / geometry.pageScale),
       0,
-      geometry.sourceHeight
+      geometry.sourceHeight / geometry.pageScale
     )
   }
 }
@@ -100,7 +112,7 @@ export function computeBrowserTouchClickRadiusCss(
   touchRadiusDip: number
 ): number {
   const geometry = computeBrowserFrameGeometry(layout, metadata)
-  const scale = geometry ? geometry.scale * zoom.scale : 1
+  const scale = geometry ? geometry.scale * zoom.scale * geometry.pageScale : 1
   if (!Number.isFinite(scale) || scale <= 0) {
     return 10
   }

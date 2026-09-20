@@ -60,6 +60,17 @@ const SOURCE = { deviceWidth: 390, deviceHeight: 712 }
  * the over-cap case below rather than the frame that paints.
  */
 const FRAME = { width: 390, height: 698 }
+/**
+ * The page scale Chromium reports for a page with no `<meta name="viewport">`.
+ *
+ * Measured on Chromium 1217, 2026-09-20 against the C6.6 `dialog.html` fixture: under a mobile
+ * emulation the page lays out at Chromium's 980 px default and is scaled into the device width, so
+ * `deviceWidth` stays the emulated width and `pageScaleFactor` carries the ratio. The browser's
+ * input commands take page CSS pixels, so a tap sent in the frame's device space lands at that
+ * fraction of the aim — 41% on the phone, which is how the proof found it. The case above is the
+ * control a page with a viewport meta produces, where the scale is one and the mapping is exact.
+ */
+const NO_VIEWPORT_META_PAGE_SCALE = SOURCE.deviceWidth / 980
 /** Noise at the largest layout the clamps admit, measured at 3,761,580 characters: 574% of the cap. */
 const OVER_CAP_FRAME = { width: 2400, height: 2160 }
 
@@ -233,9 +244,9 @@ async function encodeNoiseJpeg(page, { width, height, seed }) {
 }
 
 /** Hand the page one frame, and say what the double did with it. */
-function emitFrame(page, { b64, frameSeq, width, height }) {
+function emitFrame(page, { b64, frameSeq, width, height, pageScaleFactor = 1 }) {
   return page.evaluate(
-    ({ b64, frameSeq, width, height, source }) => {
+    ({ b64, frameSeq, width, height, pageScaleFactor, source }) => {
       const subscription = globalThis.__orcaRenderCheckSubscribes.at(-1)
       if (!subscription) {
         return 'no-subscription'
@@ -246,7 +257,7 @@ function emitFrame(page, { b64, frameSeq, width, height }) {
         frameSeq,
         metadata: {
           offsetTop: 0,
-          pageScaleFactor: 1,
+          pageScaleFactor,
           deviceWidth: source.deviceWidth,
           deviceHeight: source.deviceHeight,
           imageWidth: width,
@@ -257,7 +268,7 @@ function emitFrame(page, { b64, frameSeq, width, height }) {
         }
       })
     },
-    { b64, frameSeq, width, height, source: SOURCE }
+    { b64, frameSeq, width, height, pageScaleFactor, source: SOURCE }
   )
 }
 
@@ -504,6 +515,46 @@ describePane('the browser pane in a page', () => {
       // is a scale, an axis or a letterbox offset being wrong, which is what this is here for.
       expect(Math.abs(requests[0].params.x - SOURCE.deviceWidth / 2)).toBeLessThanOrEqual(1)
       expect(Math.abs(requests[0].params.y - SOURCE.deviceHeight / 2)).toBeLessThanOrEqual(1)
+      expect(await view.csp()).toEqual([])
+      expect(view.consoleErrors).toEqual([])
+    } finally {
+      await view.context.close()
+    }
+  }, 120_000)
+  it('maps a tap through the page scale the frame was painted at', async () => {
+    const view = await openPane({ grants: [faultGrant, BINARY_GRANT] })
+    try {
+      await view.page.waitForFunction(() => globalThis.__orcaRenderCheckSubscribes.length > 0)
+      const b64 = await encodeNoiseJpeg(view.page, { ...FRAME, seed: 22 })
+      await emitFrame(view.page, {
+        b64,
+        frameSeq: 1,
+        ...FRAME,
+        pageScaleFactor: NO_VIEWPORT_META_PAGE_SCALE
+      })
+      await waitForPaint(view.page, 1)
+
+      const box = await view.page.evaluate(() => {
+        const painted = [...document.querySelectorAll('*')].find((element) =>
+          element.style?.backgroundImage?.startsWith('url("data:image/jpeg')
+        )
+        const rect = painted.getBoundingClientRect()
+        return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }
+      })
+      await view.page.mouse.click(box.x, box.y)
+      await view.page.waitForFunction(() => globalThis.__orcaRenderCheckRequests.length > 0)
+
+      const requests = await view.page.evaluate(() => globalThis.__orcaRenderCheckRequests)
+      expect(requests[0].method).toBe('browser.mouseClick')
+      // The centre of the frame is the centre of the layout Chromium scaled into it: 980 CSS px
+      // wide, and 712 device px tall over the same scale. The tolerance is three CSS px because
+      // one device px is 2.5 of them here, and the rendered width's own fraction costs one.
+      expect(Math.abs(requests[0].params.x - 980 / 2)).toBeLessThanOrEqual(3)
+      expect(
+        Math.abs(requests[0].params.y - SOURCE.deviceHeight / 2 / NO_VIEWPORT_META_PAGE_SCALE)
+      ).toBeLessThanOrEqual(3)
+      // Unmapped, this is what the device proof recorded: the frame's own device space, on BODY.
+      expect(requests[0].params.x).not.toBe(Math.round(SOURCE.deviceWidth / 2))
       expect(await view.csp()).toEqual([])
       expect(view.consoleErrors).toEqual([])
     } finally {
