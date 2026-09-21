@@ -11,6 +11,7 @@ const request = {
   params: { filePath: '/tmp/prompt.txt', wait: true }
 }
 
+/** A minimal host keeps remote-refusal assertions at the real dispatcher boundary. */
 function fixture() {
   const host = {
     getRuntimeId: () => 'test-runtime',
@@ -28,7 +29,7 @@ describe('files.edit RPC boundary', () => {
     const response = await dispatcher.dispatch(request, { signal })
     expect(response).toMatchObject({ ok: true, result: { closed: true } })
     expect(host.editLocalFile).toHaveBeenCalledWith('/tmp/prompt.txt', true, signal)
-    expect(classifyRuntimeLongPoll(request)).toBe('wait')
+    expect(classifyRuntimeLongPoll(request)).toBe('editor')
   })
 
   it.each(['mobile', 'runtime'] as const)(

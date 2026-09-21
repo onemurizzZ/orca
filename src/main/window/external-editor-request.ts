@@ -44,6 +44,7 @@ export async function requestExternalEditor(
   return new Promise((resolve, reject) => {
     let settled = false
     let opened = false
+    /** Renderer loss, abort, and acknowledgement can race to settle the same request. */
     const finish = (error?: Error): void => {
       if (settled) {
         return
@@ -71,6 +72,7 @@ export async function requestExternalEditor(
     }
     const unavailable = (): void => finish(new Error(EXTERNAL_EDITOR_RENDERER_UNAVAILABLE))
     const aborted = (): void => finish(new Error('Editor request cancelled.'))
+    /** Only the opening renderer can acknowledge this caller’s edit session. */
     const onResponse = (event: Electron.IpcMainEvent, response: ExternalEditorResponse): void => {
       if (event.sender !== webContents || response?.requestId !== requestId) {
         return

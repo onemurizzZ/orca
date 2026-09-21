@@ -12,6 +12,7 @@ vi.mock('./external-editor-file', () => ({
 
 import { requestExternalEditor } from './external-editor-request'
 
+/** Separate emitters make cross-window acknowledgement spoofing testable. */
 function renderer() {
   const webContents = Object.assign(new EventEmitter(), {
     isDestroyed: () => false,
@@ -21,6 +22,7 @@ function renderer() {
   return { window, webContents }
 }
 
+/** Replies must follow asynchronous path validation even with a mocked filesystem. */
 async function start(wait = true) {
   const target = renderer()
   const controller = new AbortController()

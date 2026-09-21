@@ -1,3 +1,4 @@
+import { tagExternalEditorFileWait } from './external-editor-file-wait'
 import { requestEditorSaveQuiesce } from '@/components/editor/editor-autosave'
 import { useAppStore } from '../../store'
 import { openLocalFileInFloatingWorkspace } from '@/lib/open-markdown-in-floating-workspace'
@@ -24,8 +25,12 @@ export function registerExternalEditorBridge(unsubs: (() => void)[]): void {
   /** Enable the floating workspace before acknowledging a request that could otherwise stay hidden. */
   const open = async (request: ExternalEditorRequest): Promise<void> => {
     let cancelled = false
+    let unsubscribe: (() => void) | undefined
+    let forgetFileWait: (() => void) | undefined
     pending.set(request.requestId, () => {
       cancelled = true
+      unsubscribe?.()
+      forgetFileWait?.()
     })
     try {
       const store = useAppStore.getState()
@@ -36,7 +41,7 @@ export function registerExternalEditorBridge(unsubs: (() => void)[]): void {
         return
       }
       const basename = request.filePath.split(/[\\/]/).pop() || request.filePath
-      const fileId = openLocalFileInFloatingWorkspace(
+      let fileId = openLocalFileInFloatingWorkspace(
         store.openFile,
         {
           filePath: request.filePath,
@@ -51,28 +56,35 @@ export function registerExternalEditorBridge(unsubs: (() => void)[]): void {
           window.dispatchEvent(new CustomEvent(TOGGLE_FLOATING_TERMINAL_EVENT))
         }
       })
+      if (request.wait) {
+        forgetFileWait = tagExternalEditorFileWait(fileId, request.requestId)
+      }
       respond({ requestId: request.requestId, status: 'opened' })
       if (!request.wait) {
         pending.delete(request.requestId)
         return
       }
       let previousFiles = useAppStore.getState().openFiles
-      const unsubscribe = useAppStore.subscribe((state) => {
+      unsubscribe = useAppStore.subscribe((state) => {
         if (state.openFiles === previousFiles) {
           return
         }
         previousFiles = state.openFiles
-        if (state.openFiles.some((file) => file.id === fileId)) {
+        const tracked = state.openFiles.find((file) =>
+          file.externalEditorWaitIds?.includes(request.requestId)
+        )
+        if (tracked) {
+          fileId = tracked.id
           return
         }
-        unsubscribe()
+        unsubscribe?.()
         // A discarded tab can still have an earlier write in flight.
         void requestEditorSaveQuiesce({ fileId })
           .then(() => {
             if (cancelled) {
               return
             }
-            pending.delete(request.requestId)
+            cancel(request.requestId)
             respond({ requestId: request.requestId, status: 'closed' })
           })
           .catch((error: unknown) => {
@@ -82,10 +94,6 @@ export function registerExternalEditorBridge(unsubs: (() => void)[]): void {
             cancel(request.requestId)
             respond({ requestId: request.requestId, status: 'error', error: String(error) })
           })
-      })
-      pending.set(request.requestId, () => {
-        cancelled = true
-        unsubscribe()
       })
     } catch (error) {
       cancel(request.requestId)

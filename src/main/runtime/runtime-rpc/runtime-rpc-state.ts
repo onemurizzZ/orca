@@ -16,6 +16,7 @@ import type { RuntimeMetadataOwnershipWatch } from '../runtime-metadata-ownershi
 import { RUNTIME_METADATA_OWNERSHIP_POLL_MS } from '../runtime-metadata-ownership-watch'
 import {
   ASK_LONG_POLL_SHARE,
+  EDITOR_LONG_POLL_SHARE,
   BROWSER_HOST_LONG_POLL_SHARE,
   KEEPALIVE_INTERVAL_MS,
   LONG_POLL_CAP,
@@ -52,6 +53,7 @@ export class RuntimeRpcState {
   protected readonly keepaliveIntervalMs: number
   protected readonly longPollCap: number
   protected readonly metadataOwnershipPollMs: number
+  protected readonly editorLongPollCap: number
   protected readonly askLongPollCap: number
   protected readonly browserHostLongPollCap: number
   protected readonly browserHostLongPollCapPerDevice: number
@@ -88,6 +90,7 @@ export class RuntimeRpcState {
   // Why: separate from server.maxConnections — count only long-running dispatches, not short RPCs. See §3.1 + §7 risk #2.
   protected activeLongPolls = 0
   // Why: subset of activeLongPolls held by orchestration.ask, fenced by askLongPollCap.
+  protected activeEditorLongPolls = 0
   protected activeAskLongPolls = 0
   protected activeBrowserHostLongPolls = 0
   protected readonly activeBrowserHostLongPollsByDevice = new Map<string, number>()
@@ -123,6 +126,7 @@ export class RuntimeRpcState {
     this.longPollCap = longPollCap
     this.metadataOwnershipPollMs = metadataOwnershipPollMs
     // Why: derived, not configurable — the reservation must hold for whatever cap a caller picks.
+    this.editorLongPollCap = Math.max(1, Math.floor(longPollCap * EDITOR_LONG_POLL_SHARE))
     this.askLongPollCap = Math.max(1, Math.floor(longPollCap * ASK_LONG_POLL_SHARE))
     this.browserHostLongPollCap = Math.max(
       1,

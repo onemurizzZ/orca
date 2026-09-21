@@ -17,12 +17,20 @@ let state: {
   updateSettings: typeof mocks.updateSettings
   setMarkdownViewMode: typeof mocks.setMarkdownViewMode
   settings: { floatingTerminalEnabled: boolean }
-  openFiles: { id: string }[]
+  openFiles: { id: string; externalEditorWaitIds?: readonly string[] }[]
 }
 const subscribers = new Set<(value: typeof state) => void>()
 vi.mock('../../store', () => ({
   useAppStore: {
     getState: () => state,
+    setState: (update: (value: typeof state) => Partial<typeof state>) => {
+      const patch = update(state)
+      if (patch === state) {
+        return
+      }
+      state = { ...state, ...patch }
+      subscribers.forEach((listener) => listener(state))
+    },
     subscribe: (listener: (value: typeof state) => void) => {
       subscribers.add(listener)
       return () => subscribers.delete(listener)
@@ -41,6 +49,7 @@ const request: ExternalEditorRequest = {
   filePath: '/tmp/prompt.md',
   wait: true
 }
+/** Acknowledgements can follow asynchronous settings writes or save quiescence. */
 const flush = async () => {
   await new Promise((resolve) => setImmediate(resolve))
 }
@@ -131,9 +140,29 @@ describe('external editor renderer bridge', () => {
     state.openFiles.push({ id: 'other-file' })
     onRequest(request)
     await flush()
-    state.openFiles = [{ id: 'prompt-id' }]
+    state.openFiles = state.openFiles.filter((file) => file.id !== 'other-file')
     subscribers.forEach((listener) => listener(state))
     expect(respond).toHaveBeenCalledOnce()
+  })
+
+  it('follows repeated rekeys and ignores a replacement at the original ID', async () => {
+    onRequest(request)
+    await flush()
+    state.openFiles = state.openFiles.map((file) => ({ ...file, id: 'renamed-id' }))
+    subscribers.forEach((listener) => listener(state))
+    await flush()
+    expect(respond).toHaveBeenCalledOnce()
+    expect(mocks.quiesce).not.toHaveBeenCalled()
+    state.openFiles = state.openFiles.map((file) => ({ ...file, id: 'moved-parent-id' }))
+    state.openFiles.push({ id: 'prompt-id' })
+    subscribers.forEach((listener) => listener(state))
+    await flush()
+    expect(respond).toHaveBeenCalledOnce()
+    state.openFiles = state.openFiles.filter((file) => file.id !== 'moved-parent-id')
+    subscribers.forEach((listener) => listener(state))
+    await flush()
+    expect(mocks.quiesce).toHaveBeenCalledExactlyOnceWith({ fileId: 'moved-parent-id' })
+    expect(respond).toHaveBeenLastCalledWith({ requestId: request.requestId, status: 'closed' })
   })
 
   it('unsubscribes on caller cancellation without closing or reporting completion', async () => {

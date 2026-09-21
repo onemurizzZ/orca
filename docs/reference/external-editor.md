@@ -34,8 +34,10 @@ configuration automatically.
   drained before completion is reported.
 - Omitting `--wait` returns once the renderer acknowledges creating the tab.
 - Closing the whole window, reloading or crashing the renderer, losing the
-  runtime connection, or removing/renaming the original file fails the command.
-  These events are not reported as successful editing.
+  runtime connection fails the command. These events are not reported as successful editing.
+- Renaming or moving the file (including its parent folder) keeps `--wait` attached
+  to the open editor. After the tab closes, the command fails if the caller’s
+  original path no longer exists; moving it back before closing allows normal completion.
 - Ctrl+C cancels the caller's wait; it does not close the editor or discard edits.
 - Multiple callers opening the same file each wait for that tab to close.
 
@@ -56,6 +58,10 @@ An older runtime rejects the new `files.edit` method. An older renderer that
 cannot acknowledge the request times out after 30 seconds. Once acknowledged,
 the CLI waits for up to the transport timer maximum (about 24.8 days). Runtime
 long-poll admission limits and disconnect cleanup also apply to editor requests.
+Waiting editors are limited to one quarter of the shared long-poll budget
+(default: 4 of 16), and count toward the existing combined specialized-wait cap.
+This leaves capacity for terminal/orchestration waits. Opens without `--wait`
+consume no long-poll slot and still release their request on caller disconnect.
 
 `orca file open` keeps its existing workspace-scoped behavior. `file edit` is
 separate because a caller-selected temporary path needs an explicit local-file
