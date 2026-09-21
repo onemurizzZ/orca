@@ -31,7 +31,8 @@ configuration automatically.
   leaves `--wait` running. The existing unsaved-changes flow still applies;
   cancelling a close leaves the caller waiting.
 - Closing without saving returns the on-disk content. Outstanding writes are
-  drained before completion is reported.
+  drained before completion is reported, including writes that started under a
+  previous name during a file or folder rename.
 - Omitting `--wait` returns once the renderer acknowledges creating the tab.
 - Closing the whole window, reloading or crashing the renderer, losing the
   runtime connection fails the command. These events are not reported as successful editing.

@@ -1,3 +1,4 @@
+import { releaseExternalEditorSaveWait } from '@/components/editor/editor-autosave'
 import { useAppStore } from '../../store'
 import { EXTERNAL_EDITOR_RENDERER_UNAVAILABLE } from '../../../../shared/external-editor'
 
@@ -31,5 +32,6 @@ export function tagExternalEditorFileWait(fileId: string, requestId: string): ()
         })
       }
     })
+    releaseExternalEditorSaveWait(requestId)
   }
 }

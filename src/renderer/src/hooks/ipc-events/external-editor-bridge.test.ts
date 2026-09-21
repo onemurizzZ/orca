@@ -11,7 +11,10 @@ const mocks = vi.hoisted(() => ({
   visible: vi.fn(() => true),
   quiesce: vi.fn(async () => {})
 }))
-vi.mock('@/components/editor/editor-autosave', () => ({ requestEditorSaveQuiesce: mocks.quiesce }))
+vi.mock('@/components/editor/editor-autosave', () => ({
+  requestEditorSaveQuiesce: mocks.quiesce,
+  releaseExternalEditorSaveWait: vi.fn()
+}))
 let state: {
   openFile: typeof mocks.openFile
   updateSettings: typeof mocks.updateSettings
@@ -117,7 +120,10 @@ describe('external editor renderer bridge', () => {
     expect(subscribers.size).toBe(0)
   })
 
-  it('drains earlier writes before reporting completion', async () => {
+  it.each(['file', 'caller'])('drains %s writes before reporting completion', async (owner) => {
+    if (owner === 'caller') {
+      mocks.quiesce.mockResolvedValueOnce(undefined)
+    }
     let finishWrite: () => void = () => {}
     mocks.quiesce.mockImplementationOnce(
       () =>
@@ -161,7 +167,8 @@ describe('external editor renderer bridge', () => {
     state.openFiles = state.openFiles.filter((file) => file.id !== 'moved-parent-id')
     subscribers.forEach((listener) => listener(state))
     await flush()
-    expect(mocks.quiesce).toHaveBeenCalledExactlyOnceWith({ fileId: 'moved-parent-id' })
+    expect(mocks.quiesce).toHaveBeenCalledWith({ fileId: 'moved-parent-id' })
+    expect(mocks.quiesce).toHaveBeenCalledWith({ externalEditorWaitId: request.requestId })
     expect(respond).toHaveBeenLastCalledWith({ requestId: request.requestId, status: 'closed' })
   })
 

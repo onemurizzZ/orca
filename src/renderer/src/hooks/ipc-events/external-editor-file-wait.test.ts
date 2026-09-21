@@ -72,6 +72,25 @@ describe('external editor wait identities', () => {
     release()
   })
 
+  it('strips every caller identity from close-all history and reopened tabs', () => {
+    const firstId = openPrompt()
+    const secondId = openPrompt('/tmp/second.txt')
+    const releaseFirst = tagExternalEditorFileWait(firstId, 'first-caller')
+    const releaseSecond = tagExternalEditorFileWait(secondId, 'second-caller')
+    useAppStore.setState({ activeWorktreeId: FLOATING_TERMINAL_WORKTREE_ID })
+    useAppStore.getState().closeAllFiles()
+    const snapshots =
+      useAppStore.getState().recentlyClosedEditorTabsByWorktree[FLOATING_TERMINAL_WORKTREE_ID]
+    expect(snapshots).toHaveLength(2)
+    for (const snapshot of snapshots ?? []) {
+      expect(snapshot).not.toHaveProperty('externalEditorWaitIds')
+    }
+    expect(useAppStore.getState().reopenClosedEditorTab(FLOATING_TERMINAL_WORKTREE_ID)).toBe(true)
+    expect(useAppStore.getState().openFiles[0]?.externalEditorWaitIds).toBeUndefined()
+    releaseFirst()
+    releaseSecond()
+  })
+
   it('never restores wait identities through recently closed tabs or reopening the same path', () => {
     const fileId = openPrompt()
     const release = tagExternalEditorFileWait(fileId, 'request')

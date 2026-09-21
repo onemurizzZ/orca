@@ -79,7 +79,10 @@ export function registerExternalEditorBridge(unsubs: (() => void)[]): void {
         }
         unsubscribe?.()
         // A discarded tab can still have an earlier write in flight.
-        void requestEditorSaveQuiesce({ fileId })
+        void Promise.all([
+          requestEditorSaveQuiesce({ fileId }),
+          requestEditorSaveQuiesce({ externalEditorWaitId: request.requestId })
+        ])
           .then(() => {
             if (cancelled) {
               return

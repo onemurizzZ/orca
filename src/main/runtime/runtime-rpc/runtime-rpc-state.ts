@@ -89,8 +89,8 @@ export class RuntimeRpcState {
   >()
   // Why: separate from server.maxConnections — count only long-running dispatches, not short RPCs. See §3.1 + §7 risk #2.
   protected activeLongPolls = 0
-  // Why: subset of activeLongPolls held by orchestration.ask, fenced by askLongPollCap.
   protected activeEditorLongPolls = 0
+  // Why: subset of activeLongPolls held by orchestration.ask, fenced by askLongPollCap.
   protected activeAskLongPolls = 0
   protected activeBrowserHostLongPolls = 0
   protected readonly activeBrowserHostLongPollsByDevice = new Map<string, number>()
