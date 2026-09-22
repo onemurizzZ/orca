@@ -142,6 +142,23 @@ describe('external editor renderer bridge', () => {
     expect(respond).toHaveBeenLastCalledWith({ requestId: request.requestId, status: 'closed' })
   })
 
+  it('reports a failed caller save drain as error instead of closed', async () => {
+    mocks.quiesce.mockResolvedValueOnce(undefined)
+    mocks.quiesce.mockRejectedValueOnce(new Error('disk unavailable'))
+    onRequest(request)
+    await flush()
+    state.openFiles = []
+    subscribers.forEach((listener) => listener(state))
+    await flush()
+    expect(respond).toHaveBeenCalledTimes(2)
+    expect(respond).toHaveBeenLastCalledWith({
+      requestId: request.requestId,
+      status: 'error',
+      error: 'Error: disk unavailable'
+    })
+    expect(subscribers.size).toBe(0)
+  })
+
   it('does not confuse another file closing with the requested file closing', async () => {
     state.openFiles.push({ id: 'other-file' })
     onRequest(request)

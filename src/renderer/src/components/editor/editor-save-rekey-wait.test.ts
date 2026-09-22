@@ -13,10 +13,12 @@ afterEach(() => vi.unstubAllGlobals())
 /** Suspend real queue completion at the filesystem boundary. */
 function pendingWrite() {
   let resolve: () => void = () => {}
-  const promise = new Promise<void>((done) => {
+  let reject: (error: Error) => void = () => {}
+  const promise = new Promise<void>((done, fail) => {
     resolve = done
+    reject = fail
   })
-  return { promise, resolve }
+  return { promise, resolve, reject }
 }
 
 it.each([false, true])(
@@ -149,3 +151,54 @@ it('does not acknowledge a caller drain without a save controller', async () => 
     'save controller is unavailable'
   )
 })
+
+it.each([false, true])(
+  'rejects a caller drain when a write fails (already settled=%s)',
+  async (settled) => {
+    const writeFile = stubEditorWindow()
+    const store = createEditorStore()
+    store.setState((state) => ({
+      settings: state.settings && { ...state.settings, editorAutoSave: false },
+      openFiles: [
+        {
+          id: 'file',
+          filePath: '/tmp/prompt.txt',
+          relativePath: 'prompt.txt',
+          worktreeId: 'wt-1',
+          language: 'plaintext',
+          mode: 'edit',
+          isDirty: true,
+          externalEditorWaitIds: ['caller']
+        }
+      ],
+      editorDrafts: { file: 'unsaved contents' }
+    }))
+    const write = pendingWrite()
+    writeFile.mockReturnValueOnce(write.promise)
+    const dispose = attachEditorAutosaveController(store)
+    try {
+      const save = expect(requestEditorFileSave({ fileId: 'file' })).rejects.toThrow(
+        'disk unavailable'
+      )
+      await vi.waitFor(() => expect(writeFile).toHaveBeenCalledOnce())
+      if (settled) {
+        write.reject(new Error('disk unavailable'))
+        await save
+      }
+      store.setState({ openFiles: [], editorDrafts: {} })
+      const drain = expect(
+        requestEditorSaveQuiesce({ externalEditorWaitId: 'caller' })
+      ).rejects.toThrow('disk unavailable')
+      write.reject(new Error('disk unavailable'))
+      await save
+      await drain
+      releaseExternalEditorSaveWait('caller')
+      await expect(
+        requestEditorSaveQuiesce({ externalEditorWaitId: 'caller' })
+      ).resolves.toBeUndefined()
+    } finally {
+      write.resolve()
+      dispose()
+    }
+  }
+)

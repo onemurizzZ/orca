@@ -100,8 +100,12 @@ export function attachEditorAutosaveController(store: AppStoreApi): () => void {
     detail.claim()
 
     if ('externalEditorWaitId' in detail) {
-      await saveQueue.waitForExternalEditorSaves(detail.externalEditorWaitId)
-      detail.resolve()
+      try {
+        await saveQueue.waitForExternalEditorSaves(detail.externalEditorWaitId)
+        detail.resolve()
+      } catch (error) {
+        detail.reject(error)
+      }
       return
     }
 

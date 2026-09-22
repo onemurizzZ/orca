@@ -38,6 +38,7 @@ export type EditorSaveQuiesceTarget =
 export type EditorSaveQuiesceDetail = EditorSaveQuiesceTarget & {
   claim: () => void
   resolve: () => void
+  reject: (error: unknown) => void
 }
 
 export type EditorSaveFileTarget = {
@@ -189,7 +190,8 @@ export async function requestEditorSaveQuiesce(target: EditorSaveQuiesceTarget):
           claim: () => {
             claimed = true
           },
-          resolve
+          resolve,
+          reject
         }
       })
     )
